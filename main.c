@@ -4,9 +4,9 @@ int
 main(
   void)
 {
-  (VOID) w32_set_process_dpiaware();
-
-  w32_window wnd           = {0};
+  BOOL       result = FALSE;
+  w32_window wnd    = {0};
+  POINT      start  = {0L, 0L};
   LPCTSTR    lpszClassName = 
     w32_create_window_class(
       _T("w32_demo_class"),
@@ -15,13 +15,16 @@ main(
       CS_OWNDC
     );
 
-  BOOL result = 
+  (VOID) w32_set_process_dpiaware();
+  (VOID) w32_adjust_window_start_point(&start);
+
+  result = 
     w32_create_window(
       &wnd,
       _T("w32_demo"), 
       lpszClassName,
-      0,
-      0,
+      start.x,
+      start.y,
       1080,
       720,
       WS_EX_APPWINDOW,

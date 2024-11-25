@@ -99,7 +99,7 @@ monitorenumproc(
   LPDEVMODE         lpDevMode       = NULL;
 
   display_info = (w32_display_info*) lParam;
-  monitor_info = (w32_monitor_info*) &display_info->displays[display_info->numDisplays];
+  monitor_info = (w32_monitor_info*) &display_info->monitors[display_info->numMonitors];
   lpMonitorInfoEx         = (LPMONITORINFOEX) &monitor_info->monitorInfoEx;
   lpDevMode               = (LPDEVMODE) &monitor_info->deviceMode;
   lpMonitorInfoEx->cbSize = (DWORD) sizeof(MONITORINFOEX);
@@ -157,9 +157,10 @@ monitorenumproc(
     &monitor_info->deviceMode
   );
 #endif
-    return (display_info->numDisplays++ < MAX_ENUM_DISPLAYS);
+    return (display_info->numMonitors++ < MAX_ENUM_MONITORS);
 }
 
+FORCEINLINE 
 LPCTSTR
 w32_create_window_class(
   LPCTSTR    lpszClassName,
@@ -181,6 +182,7 @@ w32_create_window_class(
   return lpszClassName;
 }
 
+FORCEINLINE 
 BOOL 
 w32_create_window(
   w32_window* wnd,
@@ -218,6 +220,7 @@ w32_create_window(
   return TRUE;
 }
 
+FORCEINLINE 
 BOOL
 w32_pump_message_loop(
   w32_window *wnd, 
@@ -234,6 +237,7 @@ w32_pump_message_loop(
   return !quit;
 }
 
+FORCEINLINE 
 VOID
 w32_run_message_loop(
   w32_window* wnd, 
@@ -259,6 +263,7 @@ w32_run_message_loop(
   }
 }
 
+FORCEINLINE 
 BOOL 
 w32_get_display_info(
   w32_display_info* displayInfo)
@@ -271,6 +276,7 @@ w32_get_display_info(
   );
 }
 
+FORCEINLINE 
 BOOL 
 w32_set_process_dpiaware(
   VOID)
@@ -279,6 +285,7 @@ w32_set_process_dpiaware(
   return hr == S_OK;
 }
 
+FORCEINLINE 
 BOOL
 w32_set_alpha_composition(
   w32_window* wnd,
@@ -302,6 +309,7 @@ w32_set_alpha_composition(
   return S_OK == DwmEnableBlurBehindWindow(wnd->hWnd, &bb);
 }
 
+FORCEINLINE 
 LONG
 w32_set_timer_resolution(
   ULONG  hnsDesiredResolution, 
@@ -317,6 +325,7 @@ w32_set_timer_resolution(
   return (LONG) status;
 }
 
+FORCEINLINE 
 HANDLE
 w32_create_high_resolution_timer(
   LPSECURITY_ATTRIBUTES lpTimerAttributes,
@@ -331,6 +340,7 @@ w32_create_high_resolution_timer(
   );
 }
 
+FORCEINLINE 
 BOOL
 w32_yield_on_high_resolution_timer(
   HANDLE               hTimer, 
@@ -348,6 +358,7 @@ w32_yield_on_high_resolution_timer(
   }
 }
 
+FORCEINLINE 
 BOOL
 w32_hectonano_sleep(
   LONGLONG hns)
@@ -355,7 +366,7 @@ w32_hectonano_sleep(
   BOOL          result   = FALSE;
   LARGE_INTEGER due_time = {0};
   HANDLE        timer = w32_create_high_resolution_timer(NULL, NULL, TIMER_MODIFY_STATE);
-  if (timer == NULL)
+  if (NULL == timer)
   {
     return FALSE;
   }
@@ -364,3 +375,33 @@ w32_hectonano_sleep(
   (VOID) CloseHandle(timer);
   return result;
 }
+
+FORCEINLINE 
+BOOL
+w32_adjust_window_start_point(
+  LPPOINT point)
+{
+  MONITORINFO mi = {sizeof(MONITORINFO)};
+  if (GetMonitorInfo(
+      MonitorFromPoint(*point, MONITOR_DEFAULTTONEAREST), 
+      (LPMONITORINFO)&mi))
+  {
+    if (!PtInRect(&mi.rcWork, *point))
+    {
+      POINT x_check = {point->x, mi.rcWork.top};
+      POINT y_check = {mi.rcWork.left, point->y};
+    
+      if (!PtInRect(&mi.rcWork, x_check))
+      {
+        point->x = mi.rcWork.left;
+      }
+      if (!PtInRect(&mi.rcWork, y_check))
+      {
+        point->y = mi.rcWork.top;
+      }
+    }
+    return TRUE;
+  }
+  return FALSE;
+}
+
