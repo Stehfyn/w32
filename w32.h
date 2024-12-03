@@ -8,6 +8,13 @@
 #define MILLISECONDS_TO_100NANOSECONDS(durationMs)      ((durationMs) * 1000 * 10)
 #define MILLISECONDS_FROM_100NANOSECONDS(durationNanoS) ((durationNanoS) / (1000 * 10))
 
+typedef struct _w32_user_state {
+  ULONG_PTR   piActiveProcessID;
+  wchar_t     imageName[300];
+  POINT       cursor;
+  MONITORINFO monitorInfo;
+} w32_user_state;
+
 typedef struct _w32_timer {
   LARGE_INTEGER freq;
   LARGE_INTEGER start;
@@ -188,4 +195,19 @@ w32_borderless_wndproc(
   LPARAM      lParam,
   WNDPROCHOOK lpfnWndProcHook,
   LPVOID      lpUserData
+);
+
+EXTERN_C
+FORCEINLINE
+BOOL
+w32_get_user_state(
+  w32_user_state* us
+);
+
+EXTERN_C
+CFORCEINLINE
+BOOL
+w32_get_centered_window_point(
+  LPPOINT      p,
+  CONST LPSIZE sz
 );

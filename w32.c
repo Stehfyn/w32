@@ -285,7 +285,7 @@ borderless_on_wm_keyup(
   UNREFERENCED_PARAMETER(flags);
 
   switch (vk) {
-  case VK_SPACE: 
+  case VK_SPACE:
   {
     RECT  r    = {0};
     POINT p    = {0};
@@ -325,7 +325,9 @@ borderless_on_wm_activate(
   if (!fMinimized)
   {
     static
-    const MARGINS m = {0,0,1,0};
+    //const MARGINS m = {0,0,1,0};
+    const MARGINS m = {1,1,1,1};
+    //const MARGINS m = {0,0,0,0};
     (VOID) DwmExtendFrameIntoClientArea(hWnd, &m);
     // Inform the application of the frame change.
     (VOID) SetWindowPos(
@@ -406,20 +408,28 @@ borderless_on_wm_nccalcsize(
             (LPMONITORINFO)&monitor_info
       ))
       {
-        lpcsp->rgrc[0] = monitor_info.rcWork;
-        //lpcsp->rgrc[0].right += frame_x + padding;
-        //lpcsp->rgrc[0].left -= frame_x + padding;
-        //lpcsp->rgrc[0].bottom += frame_y + padding - 2;
+        lpcsp->rgrc[0]         = monitor_info.rcWork;
+        lpcsp->rgrc[0].right  += frame_x + padding;
+        lpcsp->rgrc[0].left   -= frame_x + padding;
+        lpcsp->rgrc[0].bottom += frame_y + padding - 2;
         return 0u;
       }
     }
-    //lpcsp->rgrc[0].right += frame_x + padding;
-    //lpcsp->rgrc[0].left -= frame_x + padding;
-    //lpcsp->rgrc[0].bottom += frame_y + padding;
-    lpcsp->rgrc[0].right  -= frame_x + padding;
-    lpcsp->rgrc[0].left   += frame_x + padding;
-    lpcsp->rgrc[0].bottom -= frame_y + padding;
-    return 0U;
+
+    //lpcsp->rgrc[0].right  -= frame_x + padding;
+    //lpcsp->rgrc[0].left   += frame_x + padding;
+    //lpcsp->rgrc[0].bottom -= (frame_y + padding);
+
+    lpcsp->rgrc[0].bottom += 1;
+    //lpcsp->rgrc[0].bottom -= 1;
+
+    //lpcsp->rgrc[0].top   += 1;
+    //lpcsp->rgrc[0].right -= 1;
+    //lpcsp->rgrc[0].left  += 1;
+
+    //return WVR_VALIDRECTS;
+    return WVR_VALIDRECTS;
+    //return 0;
   }
   else
   {
@@ -742,11 +752,69 @@ w32_borderless_wndproc(
   }
 
   switch (msg) {
-  HANDLE_MSG(hWnd, WM_KEYUP,      borderless_on_wm_keyup);
-  HANDLE_MSG(hWnd, WM_ACTIVATE,   borderless_on_wm_activate);
-  HANDLE_MSG(hWnd, WM_NCHITTEST,  borderless_on_wm_nchittest);
-  HANDLE_MSG(hWnd, WM_NCCALCSIZE, borderless_on_wm_nccalcsize);
-  HANDLE_MSG(hWnd, WM_DESTROY,    on_wm_destroy);
+  case WM_PAINT: {
+    //PAINTSTRUCT ps = {0};
+    //(VOID) BeginPaint(hWnd, &ps);
+    //(VOID) EndPaint(hWnd, &ps);
+    DwmFlush();
+
+    return DefWindowProc(hWnd, msg, wParam, lParam);
+  }
+    HANDLE_MSG(hWnd, WM_KEYUP,      borderless_on_wm_keyup);
+    HANDLE_MSG(hWnd, WM_ACTIVATE,   borderless_on_wm_activate);
+    HANDLE_MSG(hWnd, WM_NCHITTEST,  borderless_on_wm_nchittest);
+    HANDLE_MSG(hWnd, WM_NCCALCSIZE, borderless_on_wm_nccalcsize);
+    //HANDLE_MSG(hWnd, WM_ERASEBKGND, borderless_on_wm_erasebkgnd);
+    HANDLE_MSG(hWnd, WM_DESTROY,    on_wm_destroy);
   default: return DefWindowProc(hWnd, msg, wParam, lParam);
   }
+}
+
+EXTERN_C
+FORCEINLINE
+BOOL
+w32_get_user_state(
+  w32_user_state* us)
+{
+  ULONG_PTR pbi[6];
+  ULONG     ulSize = 0;
+  (VOID) GetCursorPos(&us->cursor);
+  us->monitorInfo.cbSize = sizeof(MONITORINFO);
+  (VOID) GetMonitorInfo(MonitorFromPoint(us->cursor, MONITOR_DEFAULTTONEAREST), &us->monitorInfo);
+  if(NtQueryInformationProcess(
+       GetCurrentProcess(),
+       0,
+       &pbi,
+       sizeof(pbi),
+       &ulSize
+     ) >= 0 && ulSize == sizeof(pbi))
+  {
+    DWORD size = 300;
+    us->piActiveProcessID = pbi[5];
+    HANDLE p = OpenProcess(PROCESS_ALL_ACCESS, FALSE, (DWORD) us->piActiveProcessID);
+    (VOID) QueryFullProcessImageNameW(p, 0, us->imageName, &size);
+    return TRUE;
+  }
+  us->piActiveProcessID = (ULONG_PTR)-1;
+  return FALSE;
+}
+
+EXTERN_C
+CFORCEINLINE
+BOOL
+w32_get_centered_window_point(
+  LPPOINT      p,
+  CONST LPSIZE sz)
+{
+  MONITORINFO mi = {sizeof(MONITORINFO)};
+  if (GetMonitorInfo(
+        MonitorFromPoint(*p, MONITOR_DEFAULTTONEAREST),
+        (LPMONITORINFO)&mi
+  ))
+  {
+    p->x = (LONG)(mi.rcWork.left + (0.5 * (labs(mi.rcWork.right - mi.rcWork.left) - sz->cx)));
+    p->y = (LONG)(mi.rcWork.top  + (0.5 * (labs(mi.rcWork.bottom - mi.rcWork.top) - sz->cy)));
+    return TRUE;
+  }
+  return FALSE;
 }

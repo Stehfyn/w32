@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 set target_dir=x64
-set flags=/nologo /Od /Zo /Zi /FC /std:c11 /Wall /WX /D UNICODE /D _UNICODE
+set flags=/nologo /Od /Zo /Zi /Zc:wchar_t /FC /std:c11 /Wall /WX /D UNICODE /D _UNICODE 
 set sources=..\main.c ..\w32.c
 set libs=user32.lib gdi32.lib shcore.lib dwmapi.lib ntdll.lib
 
@@ -24,7 +24,7 @@ rmdir /s /q %target_dir%
 mkdir %target_dir%
 pushd %target_dir%
 
-cl %flags% /Tc %sources% %libs%
+cl %flags% /Tc %sources% %libs% /link /SUBSYSTEM:WINDOWS
 
 if errorlevel 1 (goto fail)
 
