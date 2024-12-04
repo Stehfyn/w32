@@ -118,6 +118,12 @@ borderless_on_wm_erasebkgnd(
   HDC  hDC
 );
 
+CFORCEINLINE
+VOID
+borderless_on_wm_paint(
+  HWND hWnd
+);
+
 /*=============================================================================
 ** 4. Private functions
 **===========================================================================*/
@@ -268,6 +274,7 @@ on_wm_destroy
   HWND hWnd)
 {
   UNREFERENCED_PARAMETER(hWnd);
+
   PostQuitMessage(0);
 }
 
@@ -300,7 +307,7 @@ borderless_on_wm_keyup(
   }
   case VK_ESCAPE:
   {
-    if(hWnd == GetActiveWindow())
+    if(hWnd == GetForegroundWindow())
     {
       (VOID) PostMessage(hWnd, WM_DESTROY, 0, 0);
     }
@@ -447,6 +454,18 @@ borderless_on_wm_erasebkgnd(
   UNREFERENCED_PARAMETER(hDC);
 
   return 1U;
+}
+
+CFORCEINLINE
+VOID
+borderless_on_wm_paint(
+  HWND hWnd)
+{
+  PAINTSTRUCT ps = {0};
+  (void) BeginPaint(hWnd, &ps);
+  (void) EndPaint(hWnd, &ps);
+
+  DwmFlush();
 }
 
 /*=============================================================================
@@ -730,6 +749,8 @@ w32_timer_stop(
   tmr->elapsed.QuadPart = tmr->stop.QuadPart - tmr->start.QuadPart;
   return success;
 }
+#define HANDLE_GAY(hwnd, message, fn)  \
+        case (message): return fn((hwnd), (message), (wParam), (lParam))
 
 EXTERN_C
 LRESULT
@@ -752,20 +773,12 @@ w32_borderless_wndproc(
   }
 
   switch (msg) {
-  case WM_PAINT: {
-    //PAINTSTRUCT ps = {0};
-    //(VOID) BeginPaint(hWnd, &ps);
-    //(VOID) EndPaint(hWnd, &ps);
-    DwmFlush();
-
-    return DefWindowProc(hWnd, msg, wParam, lParam);
-  }
-    HANDLE_MSG(hWnd, WM_KEYUP,      borderless_on_wm_keyup);
-    HANDLE_MSG(hWnd, WM_ACTIVATE,   borderless_on_wm_activate);
-    HANDLE_MSG(hWnd, WM_NCHITTEST,  borderless_on_wm_nchittest);
-    HANDLE_MSG(hWnd, WM_NCCALCSIZE, borderless_on_wm_nccalcsize);
-    //HANDLE_MSG(hWnd, WM_ERASEBKGND, borderless_on_wm_erasebkgnd);
-    HANDLE_MSG(hWnd, WM_DESTROY,    on_wm_destroy);
+  HANDLE_MSG(hWnd, WM_DESTROY,    on_wm_destroy);
+  HANDLE_MSG(hWnd, WM_KEYUP,      borderless_on_wm_keyup);
+  HANDLE_MSG(hWnd, WM_ACTIVATE,   borderless_on_wm_activate);
+  HANDLE_MSG(hWnd, WM_NCHITTEST,  borderless_on_wm_nchittest);
+  HANDLE_MSG(hWnd, WM_NCCALCSIZE, borderless_on_wm_nccalcsize);
+  HANDLE_MSG(hWnd, WM_PAINT,      borderless_on_wm_paint);
   default: return DefWindowProc(hWnd, msg, wParam, lParam);
   }
 }

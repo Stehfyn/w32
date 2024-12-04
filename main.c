@@ -67,12 +67,23 @@ wmain(
     );
 
   //(VOID) w32_set_alpha_composition(&wnd, TRUE);
+  (VOID) w32_set_timer_resolution((ULONG)MILLISECONDS_TO_100NANOSECONDS(0.5), TRUE, NULL);
+  HANDLE hTimer = w32_create_high_resolution_timer(NULL, _T("GAY"), TIMER_MODIFY_STATE);
+
 
   if (result)
   {
     for(;;)
+    {
+      LARGE_INTEGER dueTime = {0};
+      __int64       COEFF   =  100'0;
+      __int64       TIMEOUT =  16'0;
+      dueTime.QuadPart = TIMEOUT * COEFF;
+      (void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
       if(!w32_pump_message_loop(&wnd, TRUE))
         break;
+      (void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
+    }
     //w32_run_message_loop(&wnd, TRUE);
   }
 
