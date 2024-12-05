@@ -1,8 +1,7 @@
 #include "w32.h"
-#include <stdio.h>
 
 int
-wmain(
+dubyamain(
   void
 );
 
@@ -10,10 +9,11 @@ int
 main(
   void)
 {
-  return wmain();
+  return dubyamain();
 }
 
-int APIENTRY
+int
+APIENTRY
 WinMain(
   HINSTANCE hInstance,
   HINSTANCE hPrevInstance,
@@ -24,25 +24,24 @@ WinMain(
   UNREFERENCED_PARAMETER(hPrevInstance);
   UNREFERENCED_PARAMETER(lpCmdLine);
   UNREFERENCED_PARAMETER(nShowCmd);
-  return wmain();
+  return dubyamain();
 }
 
 int
-wmain(
+dubyamain(
   void)
 {
-  //w32_user_state us     = {0};
-  BOOL       result = FALSE;
-  w32_window wnd    = {0};
-  POINT      start  = {0};
-  SIZE       sz     = {600, 340};
-  //(VOID) w32_get_user_state(&us);
-  //start = us.cursor;
-  GetCursorPos(&start);
-  //printf("%ls :%zu\n", (const wchar_t* const)&us.imageName[0], us.piActiveProcessID);
-  (VOID) w32_set_process_dpiaware();
-  //(VOID) w32_adjust_window_start_point(&start);
-  (VOID) w32_get_centered_window_point(&start, &sz);
+  BOOL          result  = FALSE;
+  w32_window    wnd     = {0};
+  POINT         start   = {0};
+  SIZE          sz      = {600, 340};
+  LARGE_INTEGER dueTime = {0};
+  __int64       TIMEOUT = 30'0;
+  __int64       COEFF   = -100'0;
+  (void) w32_set_process_dpiaware();
+  (void) GetCursorPos(&start);
+  (void) w32_get_centered_window_point(&start, &sz);
+  dueTime.QuadPart = TIMEOUT * COEFF;
 
   result =
     w32_create_window(
@@ -50,42 +49,40 @@ wmain(
       _T("w32_demo"),
       w32_create_window_class(
         _T("w32_demo_class"),
-        CS_VREDRAW |
-        CS_HREDRAW |
-        CS_OWNDC
+        CS_VREDRAW|CS_HREDRAW|CS_OWNDC
       ),
       start.x,
       start.y,
       sz.cx,
       sz.cy,
-      //WS_EX_APPWINDOW,
-      0,
+      WS_EX_APPWINDOW,
       WS_POPUP|WS_SYSMENU|WS_CAPTION|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX,
       w32_borderless_wndproc,
       NULL,
       NULL
     );
 
-  //(VOID) w32_set_alpha_composition(&wnd, TRUE);
-  (VOID) w32_set_timer_resolution((ULONG)MILLISECONDS_TO_100NANOSECONDS(0.5), TRUE, NULL);
-  HANDLE hTimer = w32_create_high_resolution_timer(NULL, _T("GAY"), TIMER_MODIFY_STATE);
-
-
   if (result)
   {
-    for(;;)
+    #ifdef _DEBUG
+    w32_run_message_loop(&wnd, TRUE);
+    #else
+    result = w32_set_timer_resolution((ULONG)(MILLISECONDS_TO_100NANOSECONDS(0.5)), TRUE, NULL);
+    if(result)
     {
-      LARGE_INTEGER dueTime = {0};
-      __int64       COEFF   =  100'0;
-      __int64       TIMEOUT =  16'0;
-      dueTime.QuadPart = TIMEOUT * COEFF;
-      (void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
-      if(!w32_pump_message_loop(&wnd, TRUE))
-        break;
-      (void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
+      HANDLE hTimer = w32_create_high_resolution_timer(NULL, NULL, TIMER_ALL_ACCESS);
+      if(hTimer)
+      {
+        for(;;)
+        {
+          (void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
+          if(!w32_pump_message_loop(&wnd, TRUE))
+            break;
+          (void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
+        }
+      }
     }
-    //w32_run_message_loop(&wnd, TRUE);
+    #endif
   }
-
   return 0;
 }

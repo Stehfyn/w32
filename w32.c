@@ -21,9 +21,8 @@
 /*=============================================================================
 ** 3.1 Macros
 **===========================================================================*/
+#define STATUS_SUCCESS (0x00000000)
 #define ASSERT_W32(cond) do { if (!(cond)) __debugbreak(); } while (0)
-#define STATUS_SUCCESS                  (0)
-#define STATUS_TIMER_RESOLUTION_NOT_SET (0xC0000245)
 
 /*=============================================================================
 ** 3.2 Types
@@ -466,6 +465,8 @@ borderless_on_wm_paint(
   (void) EndPaint(hWnd, &ps);
 
   DwmFlush();
+
+  FORWARD_WM_PAINT(hWnd, DefWindowProc);
 }
 
 /*=============================================================================
@@ -630,14 +631,12 @@ w32_set_timer_resolution(
   BOOL   setResolution,
   PULONG hnsCurrentResolution)
 {
-  ULONG _;
-  NTSTATUS
-    status = NtSetTimerResolution(
+  ULONG _ = {0};
+  return STATUS_SUCCESS == NtSetTimerResolution(
     hnsDesiredResolution,
     (BOOLEAN) !!setResolution,
     hnsCurrentResolution? hnsCurrentResolution : &_
-    );
-  return (LONG) status;
+  );
 }
 
 FORCEINLINE
@@ -749,8 +748,6 @@ w32_timer_stop(
   tmr->elapsed.QuadPart = tmr->stop.QuadPart - tmr->start.QuadPart;
   return success;
 }
-#define HANDLE_GAY(hwnd, message, fn)  \
-        case (message): return fn((hwnd), (message), (wParam), (lParam))
 
 EXTERN_C
 LRESULT
@@ -773,12 +770,13 @@ w32_borderless_wndproc(
   }
 
   switch (msg) {
-  HANDLE_MSG(hWnd, WM_DESTROY,    on_wm_destroy);
   HANDLE_MSG(hWnd, WM_KEYUP,      borderless_on_wm_keyup);
   HANDLE_MSG(hWnd, WM_ACTIVATE,   borderless_on_wm_activate);
   HANDLE_MSG(hWnd, WM_NCHITTEST,  borderless_on_wm_nchittest);
   HANDLE_MSG(hWnd, WM_NCCALCSIZE, borderless_on_wm_nccalcsize);
   HANDLE_MSG(hWnd, WM_PAINT,      borderless_on_wm_paint);
+  HANDLE_MSG(hWnd, WM_ERASEBKGND, borderless_on_wm_erasebkgnd);
+  HANDLE_MSG(hWnd, WM_DESTROY,    on_wm_destroy);
   default: return DefWindowProc(hWnd, msg, wParam, lParam);
   }
 }
