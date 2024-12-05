@@ -87,6 +87,16 @@ borderless_on_wm_keyup(
 
 CFORCEINLINE
 VOID
+borderless_on_wm_ncrbuttondown(
+  HWND hwnd,
+  BOOL fDoubleClick,
+  int  x,
+  int  y,
+  UINT codeHitTest
+);
+
+CFORCEINLINE
+VOID
 borderless_on_wm_activate(
   HWND hWnd,
   UINT state,
@@ -315,6 +325,57 @@ borderless_on_wm_keyup(
   }
   default: break;
   }
+}
+
+CFORCEINLINE
+VOID
+borderless_on_wm_ncrbuttondown(
+  HWND hWnd,
+  BOOL fDoubleClick,
+  int  x,
+  int  y,
+  UINT codeHitTest)
+{
+  RECT r = { 0 };
+  (void) GetWindowRect(hWnd, &r);
+  POINT pt = {0};
+  (void) GetCursorPos(&pt);
+  pt.x -= r.left;
+  pt.y -= r.top;
+  UNREFERENCED_PARAMETER(fDoubleClick);
+  UNREFERENCED_PARAMETER(x);
+  UNREFERENCED_PARAMETER(y);
+  UNREFERENCED_PARAMETER(codeHitTest);
+  HMENU hPopupMenu = CreatePopupMenu();
+  AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1001, _T("Exit"));
+  AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1002, _T("Play"));
+  ClientToScreen(hWnd, &pt);
+  if (!TrackPopupMenu(hPopupMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hWnd, NULL)) {
+    MessageBox(hWnd, _T("Failed to display context menu"), _T("Error"), MB_ICONERROR);
+  }
+  DestroyMenu(hPopupMenu);
+}
+
+CFORCEINLINE
+VOID
+borderless_on_wm_command(
+  HWND hWnd,
+  INT  id,
+  HWND hwndChild,
+  int  codeNotify)
+{
+  UNREFERENCED_PARAMETER(hwndChild);
+  UNREFERENCED_PARAMETER(codeNotify);
+  switch (id) {
+  case 1001:
+    PostMessage(hWnd, WM_CLOSE,0,0);
+    break;
+  case 1002:
+    MessageBox(hWnd, _T("You clicked Item 2"), _T("Notification"), MB_OK);
+    break;
+  }
+  FORWARD_WM_COMMAND(hWnd, id, hwndChild, codeNotify, DefWindowProc);
+  return;
 }
 
 CFORCEINLINE
@@ -770,13 +831,14 @@ w32_borderless_wndproc(
   }
 
   switch (msg) {
-  HANDLE_MSG(hWnd, WM_KEYUP,      borderless_on_wm_keyup);
-  HANDLE_MSG(hWnd, WM_ACTIVATE,   borderless_on_wm_activate);
-  HANDLE_MSG(hWnd, WM_NCHITTEST,  borderless_on_wm_nchittest);
-  HANDLE_MSG(hWnd, WM_NCCALCSIZE, borderless_on_wm_nccalcsize);
-  HANDLE_MSG(hWnd, WM_PAINT,      borderless_on_wm_paint);
-  HANDLE_MSG(hWnd, WM_ERASEBKGND, borderless_on_wm_erasebkgnd);
-  HANDLE_MSG(hWnd, WM_DESTROY,    on_wm_destroy);
+  HANDLE_MSG(hWnd, WM_KEYUP,         borderless_on_wm_keyup);
+  HANDLE_MSG(hWnd, WM_NCRBUTTONDOWN, borderless_on_wm_ncrbuttondown);
+  HANDLE_MSG(hWnd, WM_COMMAND,       borderless_on_wm_command);
+  HANDLE_MSG(hWnd, WM_ACTIVATE,      borderless_on_wm_activate);
+  HANDLE_MSG(hWnd, WM_NCHITTEST,     borderless_on_wm_nchittest);
+  HANDLE_MSG(hWnd, WM_NCCALCSIZE,    borderless_on_wm_nccalcsize);
+  HANDLE_MSG(hWnd, WM_PAINT,         borderless_on_wm_paint);
+  HANDLE_MSG(hWnd, WM_DESTROY,       on_wm_destroy);
   default: return DefWindowProc(hWnd, msg, wParam, lParam);
   }
 }
