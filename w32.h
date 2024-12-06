@@ -92,7 +92,7 @@ FORCEINLINE
 BOOL
 w32_pump_message_loop(
   w32_window* wnd,
-  BOOL        pumpThread
+  HWND        hPump
 );
 
 EXTERN_C
@@ -100,7 +100,7 @@ FORCEINLINE
 VOID
 w32_run_message_loop(
   w32_window* wnd,
-  BOOL        pumpThread
+  HWND        hPump
 );
 
 EXTERN_C

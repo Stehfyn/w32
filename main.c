@@ -65,7 +65,7 @@ dubyamain(
   if (result)
   {
     #ifdef _DEBUG
-    w32_run_message_loop(&wnd, TRUE);
+    w32_run_message_loop(&wnd, NULL);
     #else
     result = w32_set_timer_resolution((ULONG)(MILLISECONDS_TO_100NANOSECONDS(0.5)), TRUE, NULL);
     if(result)
@@ -76,7 +76,7 @@ dubyamain(
         for(;;)
         {
           (void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
-          if(!w32_pump_message_loop(&wnd, TRUE))
+          if(!w32_pump_message_loop(&wnd, NULL))
             break;
           (void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
         }

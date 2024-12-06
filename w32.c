@@ -288,6 +288,21 @@ on_wm_destroy
 }
 
 CFORCEINLINE
+BOOL
+borderless_on_wm_ncactivate(
+  HWND hWnd,
+  BOOL fActive,
+  HWND hwndActDeact,
+  BOOL fMinimized)
+{
+  UNREFERENCED_PARAMETER(hWnd);
+  UNREFERENCED_PARAMETER(fActive);
+  UNREFERENCED_PARAMETER(hwndActDeact);
+  UNREFERENCED_PARAMETER(fMinimized);
+  return TRUE;
+}
+
+CFORCEINLINE
 VOID
 borderless_on_wm_keyup(
   HWND hWnd,
@@ -463,10 +478,10 @@ borderless_on_wm_nccalcsize(
 {
   if (fCalcValidRects)
   {
-    UINT dpi     = GetDpiForWindow(hWnd);
-    int  frame_x = GetSystemMetricsForDpi(SM_CXFRAME, dpi);
-    int  frame_y = GetSystemMetricsForDpi(SM_CYFRAME, dpi);
-    int  padding = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+    //UINT dpi     = GetDpiForWindow(hWnd);
+    //int  frame_x = GetSystemMetricsForDpi(SM_CXFRAME, dpi);
+    //int  frame_y = GetSystemMetricsForDpi(SM_CYFRAME, dpi);
+    //int  padding = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
     if (IsMaximized(hWnd))
     {
       MONITORINFO monitor_info = {sizeof(MONITORINFO)};
@@ -475,19 +490,20 @@ borderless_on_wm_nccalcsize(
             (LPMONITORINFO)&monitor_info
       ))
       {
-        lpcsp->rgrc[0]         = monitor_info.rcWork;
-        lpcsp->rgrc[0].right  += frame_x + padding;
-        lpcsp->rgrc[0].left   -= frame_x + padding;
-        lpcsp->rgrc[0].bottom += frame_y + padding - 2;
+        lpcsp->rgrc[0] = monitor_info.rcWork;
+        //lpcsp->rgrc[0].right  += frame_x + padding;
+        //lpcsp->rgrc[0].left   -= frame_x + padding;
+        //lpcsp->rgrc[0].bottom += frame_y + padding - 2;
         return 0u;
       }
     }
+    lpcsp->rgrc[0].bottom += 1;
+    return WVR_VALIDRECTS;
 
     //lpcsp->rgrc[0].right  -= frame_x + padding;
     //lpcsp->rgrc[0].left   += frame_x + padding;
     //lpcsp->rgrc[0].bottom -= (frame_y + padding);
 
-    lpcsp->rgrc[0].bottom += 1;
     //lpcsp->rgrc[0].bottom -= 1;
 
     //lpcsp->rgrc[0].top   += 1;
@@ -495,7 +511,7 @@ borderless_on_wm_nccalcsize(
     //lpcsp->rgrc[0].left  += 1;
 
     //return WVR_VALIDRECTS;
-    return WVR_VALIDRECTS;
+    //return WVR_VALIDRECTS;
     //return 0;
   }
   else
@@ -521,9 +537,17 @@ VOID
 borderless_on_wm_paint(
   HWND hWnd)
 {
-  PAINTSTRUCT ps = {0};
-  (void) BeginPaint(hWnd, &ps);
+  RECT        r = {0};
+  PAINTSTRUCT ps;
+  HDC         hDC = BeginPaint(hWnd, &ps);
+
+  (void) GetWindowRect(hWnd, &r);
+  HBRUSH hBrush = CreateSolidBrush(RGB(100,100,100));
+  SelectBrush(hDC, hBrush);
+  FillRect(hDC, &r, hBrush);
+
   (void) EndPaint(hWnd, &ps);
+  DeleteObject(hBrush);
 
   DwmFlush();
 
@@ -600,11 +624,13 @@ FORCEINLINE
 BOOL
 w32_pump_message_loop(
   w32_window* wnd,
-  BOOL        pumpThread)
+  HWND        hPump)
 {
+  UNREFERENCED_PARAMETER(wnd);
+
   MSG  msg  = {0};
   BOOL quit = FALSE;
-  while (PeekMessage(&msg, pumpThread ? NULL : wnd->hWnd, 0U, 0U, PM_REMOVE))
+  while (PeekMessage(&msg, hPump, 0U, 0U, PM_REMOVE))
   {
     (VOID) TranslateMessage(&msg);
     (VOID) DispatchMessage(&msg);
@@ -617,12 +643,14 @@ FORCEINLINE
 VOID
 w32_run_message_loop(
   w32_window* wnd,
-  BOOL        pumpThread)
+  HWND        hPump)
 {
+  UNREFERENCED_PARAMETER(wnd);
+
   for (;;)
   {
     MSG  msg      = {0};
-    BOOL received = GetMessage(&msg, pumpThread ? NULL : wnd->hWnd, 0U, 0U);
+    BOOL received = GetMessage(&msg, hPump, 0U, 0U);
     if (received)
     {
       (VOID) TranslateMessage(&msg);
@@ -657,8 +685,7 @@ BOOL
 w32_set_process_dpiaware(
   VOID)
 {
-  HRESULT hr = SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
-  return hr == S_OK;
+  return S_OK == SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
 }
 
 FORCEINLINE
@@ -837,7 +864,7 @@ w32_borderless_wndproc(
   HANDLE_MSG(hWnd, WM_ACTIVATE,      borderless_on_wm_activate);
   HANDLE_MSG(hWnd, WM_NCHITTEST,     borderless_on_wm_nchittest);
   HANDLE_MSG(hWnd, WM_NCCALCSIZE,    borderless_on_wm_nccalcsize);
-  HANDLE_MSG(hWnd, WM_PAINT,         borderless_on_wm_paint);
+  //HANDLE_MSG(hWnd, WM_PAINT,         borderless_on_wm_paint);
   HANDLE_MSG(hWnd, WM_DESTROY,       on_wm_destroy);
   default: return DefWindowProc(hWnd, msg, wParam, lParam);
   }
