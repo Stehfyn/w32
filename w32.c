@@ -41,6 +41,7 @@
 ** 3.4 Static global variables
 **===========================================================================*/
 static HBITMAP hBitmap;
+static HBITMAP hBitmapBg;
 
 /*=============================================================================
 ** 3.5 External function prototypes
@@ -586,6 +587,60 @@ borderless_on_wm_erasebkgnd(
   return 1U;
 }
 
+EXTERN_C
+CFORCEINLINE
+void
+CaptureScreen(
+  HWND hWnd,
+  BOOL fErase)
+{
+  POINT cursor = {0};
+  (void) GetCursorPos(&cursor);
+  RECT r = {0};
+  (void) GetWindowRect(hWnd, &r);
+  int  nWindowWidth  = labs(r.right - r.left);
+  int  nWindowHeight = labs(r.bottom - r.top);
+  int  nScreenWidth  = GetSystemMetrics(SM_CXSCREEN);
+  int  nScreenHeight = GetSystemMetrics(SM_CYSCREEN);
+  HWND hDesktopWnd   = GetDesktopWindow();
+  HDC  hDesktopDC    = GetDC(hDesktopWnd);
+  HDC  hCaptureDC    = CreateCompatibleDC(hDesktopDC);
+
+  if(!hBitmapBg)
+  {
+    hBitmapBg = CreateCompatibleBitmap(
+      hDesktopDC,
+      nScreenWidth,
+      nScreenHeight
+    );
+  }
+  SelectObject(hCaptureDC,hBitmapBg);
+  BitBlt(
+    hCaptureDC,
+    0,
+    0,
+    nWindowWidth,
+    nWindowHeight,
+    hDesktopDC,
+    0,
+    0,
+    //cursor.x - (LONG)(0.5f * nWindowWidth),
+    //cursor.y - (LONG)(0.5f * nWindowWidth),
+    SRCCOPY|CAPTUREBLT
+  );
+  //BitBlt(hDC, 0, 0, nScreenWidth, nScreenHeight, hCaptureDC, 0, 0, SRCCOPY);
+  //here to save the captured image to disk
+
+  ReleaseDC(hDesktopWnd,hDesktopDC);
+  DeleteDC(hCaptureDC);
+  if (fErase)
+  {
+    InvalidateRect(hWnd, 0, FALSE);
+
+    UpdateWindow(hWnd);
+  }
+}
+
 CFORCEINLINE
 VOID
 borderless_on_wm_paint(
@@ -595,16 +650,21 @@ borderless_on_wm_paint(
   PAINTSTRUCT ps;
   HDC         hDC = BeginPaint(hWnd, &ps);
   (void) GetWindowRect(hWnd, &r);
-  BITMAP  bitmap;
-  HDC     hdcMem;
-  HGDIOBJ oldBitmap;
-  hdcMem    = CreateCompatibleDC(hDC);
-  oldBitmap = SelectObject(hdcMem, hBitmap);
-  GetObject(hBitmap, sizeof(bitmap), &bitmap);
-  BitBlt(hDC, 0, 0, bitmap.bmWidth, bitmap.bmHeight, hdcMem, 0, 0, SRCCOPY);
+  //CaptureScreen(hDC, &r);
+  if (hBitmapBg)
+  {
 
-  SelectObject(hdcMem, oldBitmap);
-  DeleteDC(hdcMem);
+    BITMAP  bitmap;
+    HDC     hdcMem;
+    HGDIOBJ oldBitmap;
+    hdcMem    = CreateCompatibleDC(hDC);
+    oldBitmap = SelectObject(hdcMem, hBitmapBg);
+    GetObject(hBitmap, sizeof(bitmap), &bitmap);
+    BitBlt(hDC, 0, 0, bitmap.bmWidth, bitmap.bmHeight, hdcMem, 0, 0, SRCCOPY);
+
+    SelectObject(hdcMem, oldBitmap);
+    DeleteDC(hdcMem);
+  }
   (void) EndPaint(hWnd, &ps);
   DwmFlush();
   FORWARD_WM_PAINT(hWnd, DefWindowProc);
@@ -940,7 +1000,7 @@ w32_borderless_wndproc(
       return result;
     }
   }
-
+  static UINT tID = 0;
   switch (msg) {
   //HANDLE_MSG(hWnd, WM_CREATE,        borderless_on_wmcreate);
   HANDLE_MSG(hWnd, WM_KEYUP,         borderless_on_wm_keyup);
@@ -950,8 +1010,24 @@ w32_borderless_wndproc(
   HANDLE_MSG(hWnd, WM_NCHITTEST,     borderless_on_wm_nchittest);
   HANDLE_MSG(hWnd, WM_NCCALCSIZE,    borderless_on_wm_nccalcsize);
   HANDLE_MSG(hWnd, WM_PAINT,         borderless_on_wm_paint);
-  //HANDLE_MSG(hWnd, WM_ERASEBKGND, borderless_on_wm_erasebkgnd);
   HANDLE_MSG(hWnd, WM_DESTROY,       on_wm_destroy);
+  case (WM_ENTERSIZEMOVE): {
+    (void) SetTimer(hWnd, (UINT_PTR)tID, USER_TIMER_MINIMUM, NULL);
+    return 0;
+
+  }
+  case (WM_TIMER): {
+
+    CaptureScreen(hWnd, TRUE);
+    borderless_on_wm_paint(hWnd);
+    //DwmFlush();
+    return 0;
+  }
+  case (WM_EXITSIZEMOVE): {
+    (void) KillTimer(hWnd, (UINT_PTR)tID);
+    return 0;
+  }
+  //HANDLE_MSG(hWnd, WM_ERASEBKGND, borderless_on_wm_erasebkgnd);
   default: return DefWindowProc(hWnd, msg, wParam, lParam);
   }
 }

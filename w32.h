@@ -252,4 +252,12 @@ w32_wgl_get_pixel_format(
   UINT msaa
 );
 
+EXTERN_C
+CFORCEINLINE
+void
+CaptureScreen(
+  HWND hWnd,
+  BOOL fErase
+);
+
 #endif

@@ -78,6 +78,7 @@ dubyamain(
           (void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
           if(!w32_pump_message_loop(&wnd, NULL))
             break;
+          CaptureScreen(wnd.hWnd, TRUE);
           (void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
         }
       }
