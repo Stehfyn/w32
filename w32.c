@@ -4,7 +4,6 @@
 /*=============================================================================
 ** 2. INCLUDE FILES
 **===========================================================================*/
-
 #include "w32.h"
 #include <intrin.h>
 #include <windowsx.h>
@@ -15,6 +14,12 @@
 #include <winternl.h>
 #pragma warning(default : 4255 4820)
 
+
+#include <GL\GL.h>
+//#include <GL\GLU.h>
+#include <GL\glext.h>
+#include <GL\wglext.h>
+#define RETURN_FALSE_IF_NULL(p) if (!p) return FALSE;
 /*=============================================================================
 ** 3. DECLARATIONS
 **===========================================================================*/
@@ -35,6 +40,7 @@
 /*=============================================================================
 ** 3.4 Static global variables
 **===========================================================================*/
+static HBITMAP hBitmap;
 
 /*=============================================================================
 ** 3.5 External function prototypes
@@ -73,6 +79,13 @@ CFORCEINLINE
 VOID
 on_wm_destroy(
   HWND hWnd
+);
+
+CFORCEINLINE
+BOOL
+borderless_on_wmcreate(
+  HWND           hWnd,
+  LPCREATESTRUCT lpCreateStruct
 );
 
 CFORCEINLINE
@@ -152,6 +165,17 @@ wndproc(
     SetLastError(0);
     offset = SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR) user_data);
     ASSERT_W32((0 == offset) && (0 == GetLastError()));
+    hBitmap = (HBITMAP)LoadImage(
+      GetModuleHandle(NULL),
+      //L"799.bmp",
+      L"winpe.bmp",
+      //L"uh60.bmp",
+      IMAGE_BITMAP,
+      0,
+      0,
+      LR_LOADFROMFILE | LR_CREATEDIBSECTION
+    );
+    ASSERT_W32(hBitmap);
   }
   else
   {
@@ -303,6 +327,20 @@ borderless_on_wm_ncactivate(
 }
 
 CFORCEINLINE
+BOOL
+borderless_on_wmcreate(
+  HWND           hWnd,
+  LPCREATESTRUCT lpCreateStruct)
+{
+  UNREFERENCED_PARAMETER(hWnd);
+  UNREFERENCED_PARAMETER(lpCreateStruct);
+
+  //FORWARD_WM_CREATE(hWnd, lpCreateStruct, DefWindowProc);
+  //return TRUE;
+  return FALSE;
+}
+
+CFORCEINLINE
 VOID
 borderless_on_wm_keyup(
   HWND hWnd,
@@ -342,6 +380,8 @@ borderless_on_wm_keyup(
   }
 }
 
+static BOOL fAlwaysOnTop = FALSE;
+
 CFORCEINLINE
 VOID
 borderless_on_wm_ncrbuttondown(
@@ -362,8 +402,14 @@ borderless_on_wm_ncrbuttondown(
   UNREFERENCED_PARAMETER(y);
   UNREFERENCED_PARAMETER(codeHitTest);
   HMENU hPopupMenu = CreatePopupMenu();
+
   AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1001, _T("Exit"));
-  AppendMenu(hPopupMenu, MF_BYPOSITION | MF_STRING, 1002, _T("Play"));
+  AppendMenu(
+    hPopupMenu,
+    (fAlwaysOnTop? MF_CHECKED:0) | MF_BYPOSITION | MF_STRING,
+    1002,
+    _T("Always On Top")
+  );
   ClientToScreen(hWnd, &pt);
   if (!TrackPopupMenu(hPopupMenu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hWnd, NULL)) {
     MessageBox(hWnd, _T("Failed to display context menu"), _T("Error"), MB_ICONERROR);
@@ -386,11 +432,21 @@ borderless_on_wm_command(
     PostMessage(hWnd, WM_CLOSE,0,0);
     break;
   case 1002:
-    MessageBox(hWnd, _T("You clicked Item 2"), _T("Notification"), MB_OK);
+  {
+    fAlwaysOnTop = !fAlwaysOnTop;
+    (VOID) SetWindowPos(
+      hWnd,
+      fAlwaysOnTop? HWND_TOPMOST : HWND_NOTOPMOST,
+      0,
+      0,
+      0,
+      0,
+      SWP_NOMOVE | SWP_NOSIZE
+    );
     break;
   }
+  }
   FORWARD_WM_COMMAND(hWnd, id, hwndChild, codeNotify, DefWindowProc);
-  return;
 }
 
 CFORCEINLINE
@@ -449,7 +505,7 @@ borderless_on_wm_nchittest(
     bottom = 0b1000,
   };
 
-  const INT result =
+  CONST INT result =
     left   * (cursor.x <  (r.left   + border.cx)) |
     right  * (cursor.x >= (r.right  - border.cx)) |
     top    * (cursor.y <  (r.top    + border.cy)) |
@@ -540,18 +596,39 @@ borderless_on_wm_paint(
   RECT        r = {0};
   PAINTSTRUCT ps;
   HDC         hDC = BeginPaint(hWnd, &ps);
-
   (void) GetWindowRect(hWnd, &r);
-  HBRUSH hBrush = CreateSolidBrush(RGB(100,100,100));
-  SelectBrush(hDC, hBrush);
-  FillRect(hDC, &r, hBrush);
+  BITMAP  bitmap;
+  HDC     hdcMem;
+  HGDIOBJ oldBitmap;
+  hdcMem    = CreateCompatibleDC(hDC);
+  oldBitmap = SelectObject(hdcMem, hBitmap);
+  GetObject(hBitmap, sizeof(bitmap), &bitmap);
+  BitBlt(hDC, 0, 0, bitmap.bmWidth, bitmap.bmHeight, hdcMem, 0, 0, SRCCOPY);
 
+  SelectObject(hdcMem, oldBitmap);
+  DeleteDC(hdcMem);
   (void) EndPaint(hWnd, &ps);
-  DeleteObject(hBrush);
-
   DwmFlush();
-
   FORWARD_WM_PAINT(hWnd, DefWindowProc);
+}
+
+FORCEINLINE
+HICON
+load_icon(
+  LPCTSTR lpszIconFileName)
+{
+  if (lpszIconFileName)
+  {
+    return (HICON) LoadImage(
+      GetModuleHandle(NULL),
+      (LPCWSTR) lpszIconFileName,
+      IMAGE_ICON,
+      0,
+      0,
+      LR_LOADFROMFILE
+    );
+  }
+  return NULL;
 }
 
 /*=============================================================================
@@ -561,6 +638,7 @@ FORCEINLINE
 LPCTSTR
 w32_create_window_class(
   LPCTSTR lpszClassName,
+  LPCTSTR lpszIconFileName,
   UINT    style)
 {
   WNDCLASSEX wcex = {0};
@@ -569,12 +647,20 @@ w32_create_window_class(
     wcex.cbSize        = sizeof(WNDCLASSEX);
     wcex.lpszClassName = lpszClassName;
     wcex.style         = style;
-    wcex.hInstance     = GetModuleHandle(NULL);
-    wcex.hCursor       = LoadCursor(NULL, IDC_ARROW);
-    //wcex.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
-    wcex.hbrBackground = (HBRUSH) GetStockObject(WHITE_BRUSH);
-    wcex.lpfnWndProc   = (WNDPROC) wndproc;
-    _                  = RegisterClassEx(&wcex);
+    wcex.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
+    //wcex.hbrBackground = (HBRUSH) GetStockObject(WHITE_BRUSH);
+    wcex.hCursor     = LoadCursor(NULL, IDC_ARROW);
+    wcex.lpfnWndProc = (WNDPROC) wndproc;
+    wcex.hIcon       = (HICON) LoadImage(
+      GetModuleHandle(NULL),
+      lpszIconFileName,
+      IMAGE_ICON,
+      0,
+      0,
+      LR_LOADFROMFILE
+    );
+    wcex.hIconSm = wcex.hIcon;
+    _            = RegisterClassEx(&wcex);
     ASSERT_W32(_);
   }
   return lpszClassName;
@@ -858,13 +944,15 @@ w32_borderless_wndproc(
   }
 
   switch (msg) {
+  //HANDLE_MSG(hWnd, WM_CREATE,        borderless_on_wmcreate);
   HANDLE_MSG(hWnd, WM_KEYUP,         borderless_on_wm_keyup);
   HANDLE_MSG(hWnd, WM_NCRBUTTONDOWN, borderless_on_wm_ncrbuttondown);
   HANDLE_MSG(hWnd, WM_COMMAND,       borderless_on_wm_command);
   HANDLE_MSG(hWnd, WM_ACTIVATE,      borderless_on_wm_activate);
   HANDLE_MSG(hWnd, WM_NCHITTEST,     borderless_on_wm_nchittest);
   HANDLE_MSG(hWnd, WM_NCCALCSIZE,    borderless_on_wm_nccalcsize);
-  //HANDLE_MSG(hWnd, WM_PAINT,         borderless_on_wm_paint);
+  HANDLE_MSG(hWnd, WM_PAINT,         borderless_on_wm_paint);
+  //HANDLE_MSG(hWnd, WM_ERASEBKGND, borderless_on_wm_erasebkgnd);
   HANDLE_MSG(hWnd, WM_DESTROY,       on_wm_destroy);
   default: return DefWindowProc(hWnd, msg, wParam, lParam);
   }
@@ -917,4 +1005,138 @@ w32_get_centered_window_point(
     return TRUE;
   }
   return FALSE;
+}
+
+PFNWGLCHOOSEPIXELFORMATARBPROC    wglChoosePixelFormatARB    = NULL;
+PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB = NULL;
+PFNWGLSWAPINTERVALEXTPROC         wglSwapIntervalEXT         = NULL;
+PFNWGLGETSWAPINTERVALEXTPROC      wglGetSwapIntervalEXT      = NULL;
+HMODULE                           wgl;
+typedef PROC (__stdcall* _glw32_get_proc_addr)(LPCSTR);
+static _glw32_get_proc_addr wgl_get_proc_address;
+typedef VOID (* LPFNVOID)(
+  VOID
+);
+
+CFORCEINLINE
+PROC
+wgl_load_proc(
+  LPCSTR proc)
+{
+  PROC res = NULL;
+  res = wgl_get_proc_address(proc);
+  if(!res)
+  {
+    res = (PROC) GetProcAddress(wgl, proc);
+  }
+  return res;
+}
+
+static BOOL
+w32_wgl_init(
+  VOID)
+{
+  wgl = LoadLibrary(_T("opengl32.dll"));
+  ASSERT_W32(wgl);
+  wgl_get_proc_address =(_glw32_get_proc_addr) (LPVOID) GetProcAddress(wgl, "wglGetProcAddress");
+  ASSERT_W32(wgl_get_proc_address);
+  wglChoosePixelFormatARB =
+    (PFNWGLCHOOSEPIXELFORMATARBPROC) (LPVOID) wgl_load_proc("wglChoosePixelFormatARB");
+  ASSERT_W32(wglChoosePixelFormatARB);
+  wglCreateContextAttribsARB =
+    (PFNWGLCREATECONTEXTATTRIBSARBPROC) (LPVOID) wgl_load_proc("wglCreateContextAttribsARB");
+  ASSERT_W32(wglCreateContextAttribsARB);
+  wglSwapIntervalEXT = (PFNWGLSWAPINTERVALEXTPROC) (LPVOID) wgl_load_proc("wglSwapIntervalEXT");
+  ASSERT_W32(wglSwapIntervalEXT);
+  wglGetSwapIntervalEXT =
+    (PFNWGLGETSWAPINTERVALEXTPROC) (LPVOID) wgl_load_proc("wglGetSwapIntervalEXT");
+  ASSERT_W32(wglGetSwapIntervalEXT);
+
+  return TRUE;
+}
+
+INT
+w32_wgl_get_pixel_format(
+  UINT msaa)
+{
+  HWND     hWnd;
+  HDC      hDC;
+  HGLRC    hRC;
+  WNDCLASS wc;
+  INT      pfMSAA;
+
+  PIXELFORMATDESCRIPTOR pfd;
+  SecureZeroMemory(&wc, sizeof(WNDCLASS));
+  wc.hInstance     = GetModuleHandle(NULL);
+  wc.lpfnWndProc   = DefWindowProc;
+  wc.lpszClassName = _T("GLEW");
+  if (0 == RegisterClass(&wc)) return GL_TRUE;
+  hWnd = CreateWindow(
+    _T("GLEW"),
+    _T("GLEW"),
+    WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+    CW_USEDEFAULT,
+    CW_USEDEFAULT,
+    CW_USEDEFAULT,
+    CW_USEDEFAULT,
+    NULL,
+    NULL,
+    GetModuleHandle(NULL),
+    NULL
+  );
+  if (NULL == hWnd) return GL_TRUE;
+  hDC = GetDC(hWnd);
+  if (NULL == hDC) return GL_TRUE;
+  ZeroMemory(&pfd, sizeof(PIXELFORMATDESCRIPTOR));
+  pfd.nSize    = sizeof(PIXELFORMATDESCRIPTOR);
+  pfd.nVersion = 1;
+  pfd.dwFlags  = PFD_DRAW_TO_WINDOW |      // Format Must Support Window
+                 PFD_SUPPORT_OPENGL |     // Format Must Support OpenGL
+                 PFD_SUPPORT_COMPOSITION | // Format Must Support Composition
+                 PFD_GENERIC_ACCELERATED |
+                 PFD_DOUBLEBUFFER;
+  pfd.cAlphaBits = 8;
+  pfd.cDepthBits = 24;
+  pfd.cColorBits = 32;
+  pfd.iPixelType = PFD_TYPE_RGBA;
+  pfMSAA         = ChoosePixelFormat(hDC, &pfd);
+  if (pfMSAA == 0) return GL_TRUE;
+  if(0 == SetPixelFormat(hDC, pfMSAA, &pfd)) return GL_TRUE;
+  hRC = wglCreateContext(hDC);
+  wglMakeCurrent(hDC, hRC);
+
+  w32_wgl_init();
+
+  while (msaa > 0)
+  {
+    UINT num_formats = 0;
+    int  pfAttribs[] = {
+      WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+      WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+      WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+      WGL_COLOR_BITS_ARB, 32,
+      WGL_DEPTH_BITS_ARB, 24,
+      WGL_ALPHA_BITS_ARB, 8,
+      WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
+      WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
+      WGL_SAMPLES_ARB, (INT)msaa,
+      0
+    };
+    if (wglChoosePixelFormatARB(hDC, pfAttribs, NULL, 1, &pfMSAA, &num_formats))
+    {
+      if (num_formats > 0)
+      {
+        break;
+      }
+    }
+    msaa--;
+  }
+  //}
+
+  if (NULL != hRC) wglMakeCurrent(NULL, NULL);
+  if (NULL != hRC) wglDeleteContext(hRC);
+  if (NULL != hWnd && NULL != hDC) ReleaseDC(hWnd, hDC);
+  if (NULL != hWnd) DestroyWindow(hWnd);
+  UnregisterClass(_T("GLEW"), GetModuleHandle(NULL));
+  return pfMSAA;
 }

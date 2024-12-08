@@ -42,26 +42,26 @@ dubyamain(
   (void) GetCursorPos(&start);
   (void) w32_get_centered_window_point(&start, &sz);
   dueTime.QuadPart = TIMEOUT * COEFF;
-
-  result =
-    w32_create_window(
-      &wnd,
-      _T("w32_demo"),
-      w32_create_window_class(
-        _T("w32_demo_class"),
-        CS_VREDRAW|CS_HREDRAW|CS_OWNDC
-      ),
-      start.x,
-      start.y,
-      sz.cx,
-      sz.cy,
-      WS_EX_APPWINDOW,
-      WS_POPUP|WS_SYSMENU|WS_CAPTION|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX,
-      w32_borderless_wndproc,
-      NULL,
-      NULL
-    );
-
+  //(void) w32_wgl_get_pixel_format(4U);
+  result = w32_create_window(
+    &wnd,
+    _T("main"),
+    w32_create_window_class(
+      _T("w32_demo_class"),
+      _T("checkerboard.ico"),
+      CS_VREDRAW|CS_HREDRAW|CS_OWNDC
+    ),
+    start.x,
+    start.y,
+    sz.cx,
+    sz.cy,
+    WS_EX_APPWINDOW,
+    WS_POPUP|WS_SYSMENU|WS_CAPTION|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX,
+    w32_borderless_wndproc,
+    NULL,
+    NULL
+  );
+  (void) w32_set_alpha_composition(&wnd, TRUE);
   if (result)
   {
     #ifdef _DEBUG

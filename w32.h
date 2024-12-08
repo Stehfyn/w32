@@ -1,5 +1,6 @@
-#pragma once
-
+#ifndef W32_H
+#define W32_H
+#define STRICT
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tchar.h>
@@ -40,6 +41,37 @@ typedef LRESULT (*WNDPROCOVERRIDE)(
   LPVOID      lpUserData
 );
 
+typedef BOOL (WINAPI* PFNWGLCHOOSEPIXELFORMATARBPROC) (
+  HDC hdc,
+  const int* piAttribIList,
+  const FLOAT* pfAttribFList,
+  UINT nMaxFormats,
+  int* piFormats,
+  UINT* nNumFormats
+);
+extern
+PFNWGLCHOOSEPIXELFORMATARBPROC wglChoosePixelFormatARB;
+
+typedef HGLRC (WINAPI* PFNWGLCREATECONTEXTATTRIBSARBPROC) (
+  HDC hDC,
+  HGLRC hShareContext,
+  const int* attribList
+);
+extern
+PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB;
+
+typedef BOOL (WINAPI* PFNWGLSWAPINTERVALEXTPROC) (
+  int interval
+);
+extern
+PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT;
+
+typedef int (WINAPI* PFNWGLGETSWAPINTERVALEXTPROC) (
+  void
+);
+extern
+PFNWGLGETSWAPINTERVALEXTPROC wglGetSwapIntervalEXT;
+
 typedef struct _w32_window {
   HWND            hWnd;
   WNDPROCOVERRIDE lpfnWndProcOverride;
@@ -66,6 +98,7 @@ FORCEINLINE
 LPCTSTR
 w32_create_window_class(
   LPCTSTR lpszClassName,
+  LPCTSTR lpszIconFileName,
   UINT    style
 );
 
@@ -211,3 +244,12 @@ w32_get_centered_window_point(
   LPPOINT      p,
   CONST LPSIZE sz
 );
+
+EXTERN_C
+CFORCEINLINE
+INT
+w32_wgl_get_pixel_format(
+  UINT msaa
+);
+
+#endif
