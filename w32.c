@@ -167,9 +167,7 @@ wndproc(
     ASSERT_W32((0 == offset) && (0 == GetLastError()));
     hBitmap = (HBITMAP)LoadImage(
       GetModuleHandle(NULL),
-      //L"799.bmp",
-      L"winpe.bmp",
-      //L"uh60.bmp",
+      L"res\\winpe.bmp",
       IMAGE_BITMAP,
       0,
       0,
