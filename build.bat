@@ -6,17 +6,19 @@ pushd %root%
 set exe=main.exe
 set sources=..\..\main.c ..\..\w32.c
 set libs=user32.lib gdi32.lib shcore.lib dwmapi.lib ntdll.lib opengl32.lib
-set lflags=/SUBSYSTEM:WINDOWS /CGTHREADS:8
+set lflags=/CGTHREADS:8
 
 if "%1" == "--release" or if 1 (
 set target_dir=x64\Release
 set cflags=/nologo /GL /MT /O2 /Zc:wchar_t /std:c11 /Wall /WX 
 set defines=/D UNICODE /D _UNICODE
+set lflags=%lflags% /SUBSYSTEM:WINDOWS
 )
 if "%1" == "--debug" (
 set target_dir=x64\Debug
-set cflags=/nologo /MTd /Od /Zo /Zi /Zc:wchar_t /FC /std:c11 /Wall /WX
+set cflags=/nologo /MTd /Od /Zo /Zi /Zc:wchar_t /FC /std:c11 /Wall /WX /wd4710
 set defines=/D UNICODE /D _UNICODE /D _CONSOLE
+set lflags=%lflags% /SUBSYSTEM:CONSOLE
 )
 if not defined DevEnvDir (
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"

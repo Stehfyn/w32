@@ -26,7 +26,6 @@ WinMain(
   UNREFERENCED_PARAMETER(nShowCmd);
   return dubyamain();
 }
-
 int
 dubyamain(
   void)
@@ -36,7 +35,9 @@ dubyamain(
   POINT         start   = {0};
   SIZE          sz      = {600, 340};
   LARGE_INTEGER dueTime = {0};
-  __int64       TIMEOUT = 16'7;
+  //__int64       TIMEOUT = 16'7;
+  __int64       TIMEOUT = 30'0;
+  //__int64       TIMEOUT = 8'0;
   __int64       COEFF   = -100'0;
   (void) w32_set_process_dpiaware();
   (void) GetCursorPos(&start);
@@ -66,9 +67,9 @@ dubyamain(
   (void) w32_set_alpha_composition(&wnd, TRUE);
   if (result)
   {
-    #ifdef _DEBUG
-    w32_run_message_loop(&wnd, NULL);
-    #else
+    //#ifdef _DEBUG
+    //w32_run_message_loop(&wnd, NULL);
+    //#else
     result = w32_set_timer_resolution((ULONG)(MILLISECONDS_TO_100NANOSECONDS(0.5)), TRUE, NULL);
     if(result)
     {
@@ -77,15 +78,16 @@ dubyamain(
       {
         for(;;)
         {
-          (void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
+          //(void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
           if(!w32_pump_message_loop(&wnd, NULL))
             break;
           wender(&wnd);
-          (void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
+          Sleep(15);
+          //(void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
         }
       }
     }
-    #endif
+    //#endif
   }
   return 0;
 }

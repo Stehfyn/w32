@@ -21,6 +21,7 @@ typedef struct _w32_timer {
   LARGE_INTEGER start;
   LARGE_INTEGER stop;
   LARGE_INTEGER elapsed;
+  LARGE_INTEGER elapsedAccum;
 } w32_timer;
 
 typedef BOOL (*WNDPROCHOOK)(
@@ -216,6 +217,20 @@ EXTERN_C
 FORCEINLINE
 BOOL
 w32_timer_stop(
+  w32_timer* tmr
+);
+
+EXTERN_C
+FORCEINLINE
+double
+w32_timer_elapsed(
+  w32_timer* tmr
+);
+
+EXTERN_C
+FORCEINLINE
+BOOL
+w32_timer_reset(
   w32_timer* tmr
 );
 

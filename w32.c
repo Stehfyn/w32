@@ -4,6 +4,11 @@
 /*=============================================================================
 ** 2. INCLUDE FILES
 **===========================================================================*/
+#define _CRT_SECURE_NO_WARNINGS
+#define _CRT_DISABLE_PERFCRIT_LOCKS
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 #include "w32.h"
 #include <intrin.h>
 #include <windowsx.h>
@@ -44,7 +49,7 @@ static HBITMAP hBitmapBg;
 static HDC     g_hDC;
 static HGLRC   g_hRC;
 static GLuint  g_hTex = 0;
-static LPBYTE  g_lpPixelBuf;
+static BYTE    g_lpPixelBuf[256*256*4];
 static INT     g_nWidth  = 0;
 static INT     g_nHeight = 0;
 
@@ -1014,8 +1019,36 @@ w32_timer_stop(
   w32_timer* tmr)
 {
   BOOL success = QueryPerformanceCounter(&tmr->stop);
-  tmr->elapsed.QuadPart = tmr->stop.QuadPart - tmr->start.QuadPart;
+  LONGLONG e = tmr->stop.QuadPart - tmr->start.QuadPart;
+  if(!isinf(e))
+  {
+  tmr->elapsed.QuadPart = e;
+  tmr->elapsedAccum.QuadPart +=e;
+  }
   return success;
+}
+
+EXTERN_C
+FORCEINLINE
+DOUBLE
+w32_timer_elapsed(
+  w32_timer* tmr)
+  {
+    DOUBLE e = (DOUBLE)tmr->elapsedAccum.QuadPart / (DOUBLE)tmr->freq.QuadPart;
+    return isinf(e) ? 0.0 : e;
+  }
+
+EXTERN_C
+FORCEINLINE
+BOOL
+w32_timer_reset(
+  w32_timer* tmr)
+{
+  tmr->elapsed.QuadPart = 0;
+  tmr->elapsedAccum.QuadPart = 0;
+  tmr->start.QuadPart = 0;
+  tmr->stop.QuadPart = 0;
+  return TRUE;
 }
 
 EXTERN_C
@@ -1212,6 +1245,7 @@ w32_wgl_get_pixel_format(
                  PFD_SUPPORT_OPENGL |     // Format Must Support OpenGL
                  PFD_SUPPORT_COMPOSITION | // Format Must Support Composition
                  PFD_GENERIC_ACCELERATED |
+                 PFD_SWAP_EXCHANGE |
                  PFD_DOUBLEBUFFER;
   pfd.cAlphaBits = 8;
   pfd.cDepthBits = 24;
@@ -1232,9 +1266,11 @@ w32_wgl_get_pixel_format(
       WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
       WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
       WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+      WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
       WGL_COLOR_BITS_ARB, 32,
       WGL_DEPTH_BITS_ARB, 24,
       WGL_ALPHA_BITS_ARB, 8,
+      WGL_SWAP_METHOD_ARB,WGL_SWAP_EXCHANGE_ARB,
       WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
       WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
       WGL_SAMPLES_ARB, (INT)msaa,
@@ -1273,6 +1309,7 @@ w32_wgl_attach_device(
                  PFD_SUPPORT_OPENGL |     // Format Must Support OpenGL
                  PFD_SUPPORT_COMPOSITION | // Format Must Support Composition
                  PFD_GENERIC_ACCELERATED |
+                 PFD_SWAP_EXCHANGE  |
                  PFD_DOUBLEBUFFER;
   pfd.cAlphaBits = 8;
   pfd.cDepthBits = 24;
@@ -1280,16 +1317,14 @@ w32_wgl_attach_device(
   pfd.iPixelType = PFD_TYPE_RGBA;
   HDC hDC = GetDC(wnd->hWnd);
   ASSERT_W32(SetPixelFormat(hDC, msaa, &pfd));
-  HGLRC hRC = wglCreateContext(hDC);
+  HGLRC hRC = wglCreateContextAttribsARB(hDC, NULL, NULL);
   ASSERT_W32(hRC);
   ASSERT_W32(wglMakeCurrent(hDC, hRC));
   ASSERT_W32(wglSwapIntervalEXT(0));
   g_hRC = hRC;
   g_hDC = hDC;
 
-  g_lpPixelBuf = malloc((size_t)(2560 * 1600 * 4));
-  ASSERT_W32(g_lpPixelBuf);
-  (void) memset(g_lpPixelBuf, 0, (size_t)(2560 * 1600 * 4));
+  (void) memset(g_lpPixelBuf, 0, (size_t)(256*256* 4));
   CaptureScreen(wnd->hWnd, g_lpPixelBuf);
 
   glGenTextures(1, &g_hTex);
@@ -1321,6 +1356,44 @@ void
 wender(
   w32_window* wnd)
 {
+  static w32_timer* rt = NULL;
+  static w32_timer* ft = NULL;
+  static w32_timer* cam = NULL;
+  static w32_timer* gdi = NULL;
+  static w32_timer* upload = NULL;
+  static w32_timer* quad = NULL;
+  static w32_timer* swap = NULL;
+  static int samples = 0;
+  if(!rt)
+  {
+    rt = malloc(sizeof(w32_timer));
+    ft = malloc(sizeof(w32_timer));
+    cam = malloc(sizeof(w32_timer));
+    gdi = malloc(sizeof(w32_timer));
+    upload = malloc(sizeof(w32_timer));
+    quad = malloc(sizeof(w32_timer));
+    swap = malloc(sizeof(w32_timer));
+    ASSERT_W32(rt);
+    ASSERT_W32(ft);
+    ASSERT_W32(cam);
+    ASSERT_W32(gdi);
+    ASSERT_W32(upload);
+    ASSERT_W32(quad);
+    ASSERT_W32(swap);
+    w32_timer_init(rt);
+    w32_timer_init(ft);
+    w32_timer_init(cam);
+    w32_timer_init(gdi);
+    w32_timer_init(upload);
+    w32_timer_init(quad);
+    w32_timer_init(swap);
+    w32_timer_start(rt);
+  }
+  
+
+  w32_timer_start(ft);
+
+  w32_timer_start(cam);
   glClearColor(0, 0, 0, 0);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glMatrixMode(GL_PROJECTION);
@@ -1329,12 +1402,17 @@ wender(
   glMatrixMode(GL_MODELVIEW);
   glLoadIdentity();
   glViewport(0,0,g_nWidth, g_nHeight);
+  w32_timer_stop(cam);
+
   //(void) memset(g_lpPixelBuf, 125, (size_t)(256*256*4));
+  w32_timer_start(gdi);
   CaptureScreen(wnd->hWnd, g_lpPixelBuf);
   for (int i = 0; i < 256; ++i)
     for (int j = 0; j < 256; ++j)
       g_lpPixelBuf[((j + (i * 256)) * 4) + 3] = 225;   // Alpha is at offset 3
+  w32_timer_stop(gdi);
 
+  w32_timer_start(upload);
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glEnable(GL_TEXTURE_2D);
@@ -1352,10 +1430,13 @@ wender(
     g_lpPixelBuf
   );
   #endif
+  w32_timer_stop(upload);
   // Set color (white ensures no tint)
   //glColor3f(1.0f, 1.0f, 1.0f);
 
   // Draw a textured quad
+  w32_timer_start(quad);
+
   glBegin(GL_QUADS);
   glTexCoord2f(0.0f, 0.0f);
   glVertex2f(-1.0f, -1.0f);           // Bottom-left
@@ -1369,6 +1450,45 @@ wender(
 
   // Disable texturing
   glDisable(GL_TEXTURE_2D);
-
+  w32_timer_stop(quad);
+  w32_timer_start(swap);
   SwapBuffers(g_hDC);
+  w32_timer_stop(swap);
+  w32_timer_stop(ft);
+
+  ++samples;
+  w32_timer_stop(rt);
+  if(w32_timer_elapsed(rt) < 0.0 || (w32_timer_elapsed(rt) >= 1.0))
+  //if(samples >= 60)
+  {
+    double _rt = w32_timer_elapsed(rt);
+    double _ft = w32_timer_elapsed(ft);
+    double _cam = w32_timer_elapsed(cam);
+    double _gdi = w32_timer_elapsed(gdi);
+    double _upload = w32_timer_elapsed(upload);
+    double _quad = w32_timer_elapsed(quad);
+    double _swap = w32_timer_elapsed(swap);
+    char buf[256] = {0};
+    sprintf(buf, 
+    "    rt: %lf\n    ft: %lf\n   cam: %lf\n   gdi: %lf\nupload: %lf\n  quad: %lf\n  swap: %lf\n",
+    _rt,
+    _ft / samples,
+    _cam / samples,
+    _gdi / samples,
+    _upload / samples,
+    _quad / samples,
+    _swap / samples
+    );
+    samples = 0;
+    //fwrite(buf, 1, strlen(buf), stdout);
+    printf("%s", buf);
+    w32_timer_reset(rt);
+    w32_timer_reset(ft);
+    w32_timer_reset(cam);
+    w32_timer_reset(gdi);
+    w32_timer_reset(upload);
+    w32_timer_reset(quad);
+    w32_timer_reset(swap);
+  }
+  w32_timer_start(rt);
 }
