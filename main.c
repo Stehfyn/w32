@@ -36,7 +36,7 @@ dubyamain(
   POINT         start   = {0};
   SIZE          sz      = {600, 340};
   LARGE_INTEGER dueTime = {0};
-  __int64       TIMEOUT = 30'0;
+  __int64       TIMEOUT = 16'7;
   __int64       COEFF   = -100'0;
   (void) w32_set_process_dpiaware();
   (void) GetCursorPos(&start);
@@ -61,6 +61,8 @@ dubyamain(
     NULL,
     NULL
   );
+  w32_wgl_attach_device(&wnd);
+
   (void) w32_set_alpha_composition(&wnd, TRUE);
   if (result)
   {
@@ -78,7 +80,7 @@ dubyamain(
           (void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
           if(!w32_pump_message_loop(&wnd, NULL))
             break;
-          CaptureScreen(wnd.hWnd, TRUE);
+          wender(&wnd);
           (void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
         }
       }

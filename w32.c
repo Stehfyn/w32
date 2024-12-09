@@ -7,7 +7,6 @@
 #include "w32.h"
 #include <intrin.h>
 #include <windowsx.h>
-
 #pragma warning(disable : 4255 4820)
 #include <dwmapi.h>
 #include <shellscalingapi.h>
@@ -42,6 +41,12 @@
 **===========================================================================*/
 static HBITMAP hBitmap;
 static HBITMAP hBitmapBg;
+static HDC     g_hDC;
+static HGLRC   g_hRC;
+static GLuint  g_hTex = 0;
+static LPBYTE  g_lpPixelBuf;
+static INT     g_nWidth  = 0;
+static INT     g_nHeight = 0;
 
 /*=============================================================================
 ** 3.5 External function prototypes
@@ -87,6 +92,15 @@ BOOL
 borderless_on_wmcreate(
   HWND           hWnd,
   LPCREATESTRUCT lpCreateStruct
+);
+
+CFORCEINLINE
+VOID
+borderless_on_wm_size(
+  HWND hWnd,
+  UINT state,
+  int  cx,
+  int  cy
 );
 
 CFORCEINLINE
@@ -341,6 +355,23 @@ borderless_on_wmcreate(
 
 CFORCEINLINE
 VOID
+borderless_on_wm_size(
+  HWND hWnd,
+  UINT state,
+  int  cx,
+  int  cy)
+{
+  UNREFERENCED_PARAMETER(hWnd);
+
+  if(SIZE_MINIMIZED != state)
+  {
+    g_nWidth  = cx;
+    g_nHeight = cy;
+  }
+}
+
+CFORCEINLINE
+VOID
 borderless_on_wm_keyup(
   HWND hWnd,
   UINT vk,
@@ -569,10 +600,7 @@ borderless_on_wm_nccalcsize(
     //return WVR_VALIDRECTS;
     //return 0;
   }
-  else
-  {
-    return FORWARD_WM_NCCALCSIZE(hWnd, fCalcValidRects, lpcsp, DefWindowProc);
-  }
+  return 0U;
 }
 
 CFORCEINLINE
@@ -591,54 +619,60 @@ EXTERN_C
 CFORCEINLINE
 void
 CaptureScreen(
-  HWND hWnd,
-  BOOL fErase)
+  HWND   hWnd,
+  LPBYTE buf)
 {
   POINT cursor = {0};
   (void) GetCursorPos(&cursor);
   RECT r = {0};
   (void) GetWindowRect(hWnd, &r);
-  int  nWindowWidth  = labs(r.right - r.left);
-  int  nWindowHeight = labs(r.bottom - r.top);
-  int  nScreenWidth  = GetSystemMetrics(SM_CXSCREEN);
-  int  nScreenHeight = GetSystemMetrics(SM_CYSCREEN);
-  HWND hDesktopWnd   = GetDesktopWindow();
-  HDC  hDesktopDC    = GetDC(hDesktopWnd);
-  HDC  hCaptureDC    = CreateCompatibleDC(hDesktopDC);
+  //int  nWindowWidth  = labs(r.right - r.left);
+  //int  nWindowHeight = labs(r.bottom - r.top);
+  //int  nScreenWidth  = GetSystemMetrics(SM_CXSCREEN);
+  //int  nScreenHeight = GetSystemMetrics(SM_CYSCREEN);
+  HWND hDesktopWnd = GetDesktopWindow();
+  HDC  hDesktopDC  = GetDC(hDesktopWnd);
+  HDC  hCaptureDC  = CreateCompatibleDC(hDesktopDC);
 
   if(!hBitmapBg)
   {
     hBitmapBg = CreateCompatibleBitmap(
       hDesktopDC,
-      nScreenWidth,
-      nScreenHeight
+      256,
+      256
     );
   }
-  SelectObject(hCaptureDC,hBitmapBg);
-  BitBlt(
-    hCaptureDC,
-    0,
-    0,
-    nWindowWidth,
-    nWindowHeight,
-    hDesktopDC,
-    0,
-    0,
-    //cursor.x - (LONG)(0.5f * nWindowWidth),
-    //cursor.y - (LONG)(0.5f * nWindowWidth),
-    SRCCOPY|CAPTUREBLT
-  );
+  if(hBitmapBg)
+  {
+    BITMAPINFOHEADER bi = {0};
+    bi.biSize        =sizeof(BITMAPINFOHEADER);
+    bi.biWidth       = 256;
+    bi.biHeight      = 256; // Negative to flip vertically for OpenGL
+    bi.biPlanes      =1;
+    bi.biBitCount    =32; // RGBA
+    bi.biCompression =BI_RGB;
+    SelectObject(hCaptureDC,hBitmapBg);
+    BitBlt(
+      hCaptureDC,
+      0,
+      0,
+      256,
+      256,
+      hDesktopDC,
+      //0,
+      //0,
+      max(min(cursor.x - (LONG)(0.5f * 256), 2560 - 256), 0),
+      max(min(cursor.y - (LONG)(0.5f * 256), 1600 - 256), 0),
+      SRCCOPY|CAPTUREBLT
+    );
+
+    GetDIBits(hCaptureDC, hBitmapBg, 0, 256, buf, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+  }
   //BitBlt(hDC, 0, 0, nScreenWidth, nScreenHeight, hCaptureDC, 0, 0, SRCCOPY);
   //here to save the captured image to disk
 
   ReleaseDC(hDesktopWnd,hDesktopDC);
   DeleteDC(hCaptureDC);
-  if (fErase)
-  {
-    InvalidateRect(hWnd, 0, FALSE);
-
-    UpdateWindow(hWnd);
-  }
 }
 
 CFORCEINLINE
@@ -650,6 +684,8 @@ borderless_on_wm_paint(
   PAINTSTRUCT ps;
   HDC         hDC = BeginPaint(hWnd, &ps);
   (void) GetWindowRect(hWnd, &r);
+  (void)hDC;
+  #if 0
   //CaptureScreen(hDC, &r);
   if (hBitmapBg)
   {
@@ -665,6 +701,7 @@ borderless_on_wm_paint(
     SelectObject(hdcMem, oldBitmap);
     DeleteDC(hdcMem);
   }
+  #endif
   (void) EndPaint(hWnd, &ps);
   DwmFlush();
   FORWARD_WM_PAINT(hWnd, DefWindowProc);
@@ -1002,6 +1039,7 @@ w32_borderless_wndproc(
   }
   static UINT tID = 0;
   switch (msg) {
+  HANDLE_MSG(hWnd, WM_SIZE, borderless_on_wm_size);
   //HANDLE_MSG(hWnd, WM_CREATE,        borderless_on_wmcreate);
   HANDLE_MSG(hWnd, WM_KEYUP,         borderless_on_wm_keyup);
   HANDLE_MSG(hWnd, WM_NCRBUTTONDOWN, borderless_on_wm_ncrbuttondown);
@@ -1009,7 +1047,8 @@ w32_borderless_wndproc(
   HANDLE_MSG(hWnd, WM_ACTIVATE,      borderless_on_wm_activate);
   HANDLE_MSG(hWnd, WM_NCHITTEST,     borderless_on_wm_nchittest);
   HANDLE_MSG(hWnd, WM_NCCALCSIZE,    borderless_on_wm_nccalcsize);
-  HANDLE_MSG(hWnd, WM_PAINT,         borderless_on_wm_paint);
+  //HANDLE_MSG(hWnd, WM_PAINT,         borderless_on_wm_paint);
+  HANDLE_MSG(hWnd, WM_ERASEBKGND,    borderless_on_wm_erasebkgnd);
   HANDLE_MSG(hWnd, WM_DESTROY,       on_wm_destroy);
   case (WM_ENTERSIZEMOVE): {
     (void) SetTimer(hWnd, (UINT_PTR)tID, USER_TIMER_MINIMUM, NULL);
@@ -1017,10 +1056,15 @@ w32_borderless_wndproc(
 
   }
   case (WM_TIMER): {
+    static w32_window* wnd = NULL;
+    if(!wnd){
 
-    CaptureScreen(hWnd, TRUE);
-    borderless_on_wm_paint(hWnd);
-    //DwmFlush();
+      wnd = (w32_window*) GetWindowLongPtr(hWnd, GWLP_USERDATA);
+    }
+    wender(wnd);
+    //CaptureScreen(hWnd, TRUE);
+    //borderless_on_wm_paint(hWnd);
+    DwmFlush();
     return 0;
   }
   case (WM_EXITSIZEMOVE): {
@@ -1213,4 +1257,118 @@ w32_wgl_get_pixel_format(
   if (NULL != hWnd) DestroyWindow(hWnd);
   UnregisterClass(_T("GLEW"), GetModuleHandle(NULL));
   return pfMSAA;
+}
+
+EXTERN_C
+CFORCEINLINE
+void
+w32_wgl_attach_device(
+  w32_window* wnd)
+{
+  PIXELFORMATDESCRIPTOR pfd  = {0};
+  INT                   msaa = w32_wgl_get_pixel_format(16U);
+  pfd.nSize    = sizeof(PIXELFORMATDESCRIPTOR);
+  pfd.nVersion = 1;
+  pfd.dwFlags  = PFD_DRAW_TO_WINDOW |     // Format Must Support Window
+                 PFD_SUPPORT_OPENGL |     // Format Must Support OpenGL
+                 PFD_SUPPORT_COMPOSITION | // Format Must Support Composition
+                 PFD_GENERIC_ACCELERATED |
+                 PFD_DOUBLEBUFFER;
+  pfd.cAlphaBits = 8;
+  pfd.cDepthBits = 24;
+  pfd.cColorBits = 32;
+  pfd.iPixelType = PFD_TYPE_RGBA;
+  HDC hDC = GetDC(wnd->hWnd);
+  ASSERT_W32(SetPixelFormat(hDC, msaa, &pfd));
+  HGLRC hRC = wglCreateContext(hDC);
+  ASSERT_W32(hRC);
+  ASSERT_W32(wglMakeCurrent(hDC, hRC));
+  ASSERT_W32(wglSwapIntervalEXT(0));
+  g_hRC = hRC;
+  g_hDC = hDC;
+
+  g_lpPixelBuf = malloc((size_t)(2560 * 1600 * 4));
+  ASSERT_W32(g_lpPixelBuf);
+  (void) memset(g_lpPixelBuf, 0, (size_t)(2560 * 1600 * 4));
+  CaptureScreen(wnd->hWnd, g_lpPixelBuf);
+
+  glGenTextures(1, &g_hTex);
+  glBindTexture(GL_TEXTURE_2D, g_hTex);
+  ASSERT_W32(g_hTex);
+  // Upload texture data
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+  //glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+  //glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_DECAL);
+  glTexImage2D(
+    GL_TEXTURE_2D,
+    0,
+    GL_BGRA,
+    256,
+    256,
+    0,
+    GL_BGRA,
+    GL_UNSIGNED_BYTE,
+    g_lpPixelBuf
+  );
+}
+
+EXTERN_C
+CFORCEINLINE
+void
+wender(
+  w32_window* wnd)
+{
+  glClearColor(0, 0, 0, 0);
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+  glMatrixMode(GL_MODELVIEW);
+  glLoadIdentity();
+  glViewport(0,0,g_nWidth, g_nHeight);
+  //(void) memset(g_lpPixelBuf, 125, (size_t)(256*256*4));
+  CaptureScreen(wnd->hWnd, g_lpPixelBuf);
+  for (int i = 0; i < 256; ++i)
+    for (int j = 0; j < 256; ++j)
+      g_lpPixelBuf[((j + (i * 256)) * 4) + 3] = 225;   // Alpha is at offset 3
+
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glEnable(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, g_hTex);
+  #if 1
+  glTexSubImage2D(
+    GL_TEXTURE_2D,
+    0,
+    0,
+    0,
+    256,
+    256,
+    GL_BGRA,
+    GL_UNSIGNED_BYTE,
+    g_lpPixelBuf
+  );
+  #endif
+  // Set color (white ensures no tint)
+  //glColor3f(1.0f, 1.0f, 1.0f);
+
+  // Draw a textured quad
+  glBegin(GL_QUADS);
+  glTexCoord2f(0.0f, 0.0f);
+  glVertex2f(-1.0f, -1.0f);           // Bottom-left
+  glTexCoord2f(1.0f, 0.0f);
+  glVertex2f(1.0f, -1.0f);           // Bottom-right
+  glTexCoord2f(1.0f, 1.0f);
+  glVertex2f(1.0f,1.0f);           // Top-right
+  glTexCoord2f(0.0f, 1.0f);
+  glVertex2f(-1.0f,1.0f);           // Top-left
+  glEnd();
+
+  // Disable texturing
+  glDisable(GL_TEXTURE_2D);
+
+  SwapBuffers(g_hDC);
 }

@@ -256,8 +256,21 @@ EXTERN_C
 CFORCEINLINE
 void
 CaptureScreen(
-  HWND hWnd,
-  BOOL fErase
+  HWND   hWnd,
+  LPBYTE buf
 );
 
+EXTERN_C
+CFORCEINLINE
+void
+w32_wgl_attach_device(
+  w32_window* wnd
+);
+
+EXTERN_C
+CFORCEINLINE
+VOID
+wender(
+  w32_window* wnd
+);
 #endif

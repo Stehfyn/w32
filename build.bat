@@ -27,7 +27,8 @@ echo vcvars64.bat not found
 )
 
 taskkill /f /im %exe% >NUL 2>&1
-ping -n 1 -w 100 127.0.0.1 > nul
+taskkill /f /im %exe% >NUL 2>&1
+ping -n 1 -w 1000 127.0.0.1 > nul
 rmdir /s /q %target_dir%
 if errorlevel 1 (goto fail)
 mkdir %target_dir%
