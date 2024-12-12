@@ -5,19 +5,19 @@ pushd %root%
 
 set exe=main.exe
 set sources=..\..\main.c ..\..\w32.c
-set libs=user32.lib gdi32.lib shcore.lib dwmapi.lib ntdll.lib opengl32.lib
+set libs=user32.lib gdi32.lib shcore.lib dwmapi.lib ntdll.lib opengl32.lib runtimeobject.lib Ole32.lib Advapi32.lib
 set lflags=/CGTHREADS:8
+set defines=/D UNICODE /D _UNICODE
 
 if "%1" == "--release" or if 1 (
 set target_dir=x64\Release
-set cflags=/nologo /GL /MT /O2 /Zc:wchar_t /std:c11 /Wall /WX 
-set defines=/D UNICODE /D _UNICODE
+set cflags=/nologo /GL /MT /O2 /Zc:wchar_t /std:c11 /Wall /WX /wd4710
 set lflags=%lflags% /SUBSYSTEM:WINDOWS
 )
 if "%1" == "--debug" (
 set target_dir=x64\Debug
 set cflags=/nologo /MTd /Od /Zo /Zi /Zc:wchar_t /FC /std:c11 /Wall /WX /wd4710
-set defines=/D UNICODE /D _UNICODE /D _CONSOLE
+set defines=%defines% /D _CONSOLE
 set lflags=%lflags% /SUBSYSTEM:CONSOLE
 )
 if not defined DevEnvDir (
@@ -46,4 +46,6 @@ echo Failure generating code
 
 popd
 popd
+endlocal
+
 exit /b errorlevel
