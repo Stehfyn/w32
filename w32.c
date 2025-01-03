@@ -1110,35 +1110,6 @@ w32_borderless_wndproc(
 }
 
 EXTERN_C
-FORCEINLINE
-BOOL
-w32_get_user_state(
-  w32_user_state* us)
-{
-  ULONG_PTR pbi[6];
-  ULONG     ulSize = 0;
-  (VOID) GetCursorPos(&us->cursor);
-  us->monitorInfo.cbSize = sizeof(MONITORINFO);
-  (VOID) GetMonitorInfo(MonitorFromPoint(us->cursor, MONITOR_DEFAULTTONEAREST), &us->monitorInfo);
-  if(NtQueryInformationProcess(
-       GetCurrentProcess(),
-       0,
-       &pbi,
-       sizeof(pbi),
-       &ulSize
-     ) >= 0 && ulSize == sizeof(pbi))
-  {
-    DWORD size = 300;
-    us->piActiveProcessID = pbi[5];
-    HANDLE p = OpenProcess(PROCESS_ALL_ACCESS, FALSE, (DWORD) us->piActiveProcessID);
-    (VOID) QueryFullProcessImageNameW(p, 0, us->imageName, &size);
-    return TRUE;
-  }
-  us->piActiveProcessID = (ULONG_PTR)-1;
-  return FALSE;
-}
-
-EXTERN_C
 CFORCEINLINE
 BOOL
 w32_get_centered_window_point(
@@ -1242,7 +1213,7 @@ w32_wgl_get_pixel_format(
   pfd.nSize    = sizeof(PIXELFORMATDESCRIPTOR);
   pfd.nVersion = 1;
   pfd.dwFlags  = PFD_DRAW_TO_WINDOW |      // Format Must Support Window
-                 PFD_SUPPORT_OPENGL |     // Format Must Support OpenGL
+                 PFD_SUPPORT_OPENGL |      // Format Must Support OpenGL
                  PFD_SUPPORT_COMPOSITION | // Format Must Support Composition
                  PFD_GENERIC_ACCELERATED |
                  PFD_SWAP_EXCHANGE |
@@ -1390,7 +1361,6 @@ wender(
     w32_timer_start(rt);
   }
   
-
   w32_timer_start(ft);
 
   w32_timer_start(cam);
@@ -1461,27 +1431,27 @@ wender(
   if(w32_timer_elapsed(rt) < 0.0 || (w32_timer_elapsed(rt) >= 1.0))
   //if(samples >= 60)
   {
-    double _rt = w32_timer_elapsed(rt);
-    double _ft = w32_timer_elapsed(ft);
-    double _cam = w32_timer_elapsed(cam);
-    double _gdi = w32_timer_elapsed(gdi);
-    double _upload = w32_timer_elapsed(upload);
-    double _quad = w32_timer_elapsed(quad);
-    double _swap = w32_timer_elapsed(swap);
-    char buf[256] = {0};
-    sprintf(buf, 
-    "    rt: %lf\n    ft: %lf\n   cam: %lf\n   gdi: %lf\nupload: %lf\n  quad: %lf\n  swap: %lf\n",
-    _rt,
-    _ft / samples,
-    _cam / samples,
-    _gdi / samples,
-    _upload / samples,
-    _quad / samples,
-    _swap / samples
-    );
-    samples = 0;
-    //fwrite(buf, 1, strlen(buf), stdout);
-    printf("%s", buf);
+    //double _rt = w32_timer_elapsed(rt);
+    //double _ft = w32_timer_elapsed(ft);
+    //double _cam = w32_timer_elapsed(cam);
+    //double _gdi = w32_timer_elapsed(gdi);
+    //double _upload = w32_timer_elapsed(upload);
+    //double _quad = w32_timer_elapsed(quad);
+    //double _swap = w32_timer_elapsed(swap);
+    //char buf[256] = {0};
+    //sprintf(buf, 
+    //"    rt: %lf\n    ft: %lf\n   cam: %lf\n   gdi: %lf\nupload: %lf\n  quad: %lf\n  swap: %lf\n",
+    //_rt,
+    //_ft / samples,
+    //_cam / samples,
+    //_gdi / samples,
+    //_upload / samples,
+    //_quad / samples,
+    //_swap / samples
+    //);
+    //samples = 0;
+    ////fwrite(buf, 1, strlen(buf), stdout);
+    //printf("%s", buf);
     w32_timer_reset(rt);
     w32_timer_reset(ft);
     w32_timer_reset(cam);

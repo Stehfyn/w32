@@ -1,51 +1,45 @@
 @echo off
 setlocal enabledelayedexpansion
-set root="%~dp0"
-pushd %root%
+cd "%~dp0"
 
-set exe=main.exe
-set sources=..\..\main.c ..\..\w32.c
-set libs=user32.lib gdi32.lib shcore.lib dwmapi.lib ntdll.lib opengl32.lib runtimeobject.lib Ole32.lib Advapi32.lib
+for /f "usebackq tokens=*" %%a in (`call "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -prerelease -products * -requires Microsoft.Component.MSBuild -property installationPath`) do (
+   set "VSINSTALLPATH=%%a"
+)
+
+if not defined VSINSTALLPATH (
+   echo No Visual Studio installation detected.
+   exit /b 0
+)
+
+set out=out
+set sources=..\..\demo.c ..\..\w32.c
+set cflags=/nologo /O2 /Oi /MT /std:c11 /Wall /WX /wd4710 /wd4191 /D _NDEBUG /D UNICODE /D _UNICODE
+set libs=ntdll.lib gdi32.lib dwmapi.lib Shcore.lib Kernel32.lib libcmt.lib user32.lib comctl32.lib  Shlwapi.lib shell32.lib runtimeobject.lib ole32.lib advapi32.lib glu32.lib opengl32.lib
 set lflags=/CGTHREADS:8
-set defines=/D UNICODE /D _UNICODE
 
-if "%1" == "--release" or if 1 (
-set target_dir=x64\Release
-set cflags=/nologo /GL /MT /O2 /Zc:wchar_t /std:c11 /Wall /WX /wd4710
-set lflags=%lflags% /SUBSYSTEM:WINDOWS
-)
-if "%1" == "--debug" (
-set target_dir=x64\Debug
-set cflags=/nologo /MTd /Od /Zo /Zi /Zc:wchar_t /FC /std:c11 /Wall /WX /wd4710
-set defines=%defines% /D _CONSOLE
-set lflags=%lflags% /SUBSYSTEM:CONSOLE
-)
-if not defined DevEnvDir (
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-if errorlevel 1 (
-echo vcvars64.bat not found
-(goto fail)
-)
+set "build_demo=/?"
+
+if exist "%VSINSTALLPATH%\VC\Auxiliary\Build\vcvarsall.bat" (
+	rmdir /s /q %out% 2>nul
+	mkdir %out%
+	pushd %out%
+	call :%%build_demo%% demo x86 3>&1 >nul
+	call :%%build_demo%% demo x64 3>&1 >nul
+	popd
 )
 
-taskkill /f /im %exe% >NUL 2>&1
-taskkill /f /im %exe% >NUL 2>&1
-ping -n 1 -w 1000 127.0.0.1 > nul
-rmdir /s /q %target_dir%
-if errorlevel 1 (goto fail)
-mkdir %target_dir%
-if errorlevel 1 (goto fail)
-pushd %target_dir%
+if "%0" == ":%build_demo%" (
+	echo Build %1 %2 @call:
+	call "%VSINSTALLPATH%\VC\Auxiliary\Build\vcvarsall.bat" %2
+	taskkill /f /im %1%2.exe >NUL 2>&1
+	rmdir /s /q %2 2>nul
+	mkdir %2
+	pushd %2
+	echo. && echo %2 %1 exe
+	cl %cflags% /Tc %sources% %libs% /link /MACHINE:%2 /OUT:%1.exe /SUBSYSTEM:Windows
+	move %1.exe ..\%1%2.exe
+	popd
+	rmdir /s /q %2 2>nul
+)>&3
 
-cl %cflags% %defines% /Tc %sources% %libs% /link %lflags% /out:%exe%
-
-if errorlevel 1 (
-:fail
-echo Failure generating code
-)
-
-popd
-popd
-endlocal
-
-exit /b errorlevel
+exit /b 0
