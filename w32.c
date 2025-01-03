@@ -5,24 +5,27 @@
 ** 2. INCLUDE FILES
 **===========================================================================*/
 #define _CRT_SECURE_NO_WARNINGS
-#define _CRT_DISABLE_PERFCRIT_LOCKS
+//#define _CRT_DISABLE_PERFCRIT_LOCKS
+#include "w32.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include "w32.h"
 #include <intrin.h>
 #include <windowsx.h>
+#include <initguid.h>
 #pragma warning(disable : 4255 4820)
-#include <dwmapi.h>
-#include <shellscalingapi.h>
 #include <winternl.h>
+#include <shellscalingapi.h>
+#include <dwmapi.h>
+#include <roapi.h>
+#include <Windows.ui.notifications.h>
 #pragma warning(default : 4255 4820)
-
+#include <notificationactivationcallback.h>
 
 #include <GL\GL.h>
-//#include <GL\GLU.h>
 #include <GL\glext.h>
 #include <GL\wglext.h>
+
 #define RETURN_FALSE_IF_NULL(p) if (!p) return FALSE;
 /*=============================================================================
 ** 3. DECLARATIONS
@@ -32,10 +35,95 @@
 **===========================================================================*/
 #define STATUS_SUCCESS (0x00000000)
 #define ASSERT_W32(cond) do { if (!(cond)) __debugbreak(); } while (0)
+#define CAPTURE_REGION (800)
+#define GUID_Impl_INotificationActivationCallback_Textual "0F82E845-CB89-4039-BDBF-67CA33254C76"
+DEFINE_GUID(
+  GUID_Impl_INotificationActivationCallback,
+  0xf82e845,
+  0xcb89,
+  0x4039,
+  0xbd,
+  0xbf,
+  0x67,
+  0xca,
+  0x33,
+  0x25,
+  0x4c,
+  0x76
+);
 
+//{ 0x53E31837, 0x6600, 0x4A81, 0x93, 0x95, 0x75, 0xCF, 0xFE, 0x74, 0x6F, 0x94 };
+
+DEFINE_GUID(
+  IID_IToastNotificationManagerStatics,
+  0x50ac103f,
+  0xd235,
+  0x4598,
+  0xbb,
+  0xef,
+  0x98,
+  0xfe,
+  0x4d,
+  0x1a,
+  0x3a,
+  0xd4
+);
+
+DEFINE_GUID(
+  IID_IToastNotificationFactory,
+  0x04124b20,
+  0x82c6,
+  0x4229,
+  0xb1,
+  0x09,
+  0xfd,
+  0x9e,
+  0xd4,
+  0x66,
+  0x2b,
+  0x53
+);
+
+DEFINE_GUID(
+  IID_IXmlDocument,
+  0xf7f3a506,
+  0x1e87,
+  0x42d6,
+  0xbc,
+  0xfb,
+  0xb8,
+  0xc8,
+  0x09,
+  0xfa,
+  0x54,
+  0x94
+);
+
+DEFINE_GUID(
+  IID_IXmlDocumentIO,
+  0x6cd0e74e,
+  0xee65,
+  0x4489,
+  0x9e,
+  0xbf,
+  0xca,
+  0x43,
+  0xe8,
+  0x7b,
+  0xa6,
+  0x37
+);
+
+#define APP_ID L"w32_demo"
+#define TOAST_ACTIVATED_LAUNCH_ARG "-ToastActivated"
 /*=============================================================================
 ** 3.2 Types
 **===========================================================================*/
+typedef struct Impl_IGeneric {
+  IUnknownVtbl* lpVtbl;
+  //DWORD         unused;
+  LONG64 dwRefCount;
+} Impl_IGeneric;
 
 /*=============================================================================
 ** 3.3 External global variables
@@ -44,12 +132,33 @@
 /*=============================================================================
 ** 3.4 Static global variables
 **===========================================================================*/
+const wchar_t wszBannerText[] =
+  L"<toast scenario=\"reminder\" "
+  L"activationType=\"foreground\" launch=\"action=mainContent\" duration=\"short\">\r\n"
+  L"	<visual>\r\n"
+  L"		<binding template=\"ToastGeneric\">\r\n"
+  L"			<text><![CDATA[This is a demo notification]]></text>\r\n"
+  L"			<text><![CDATA[It contains 2 lines of text]]></text>\r\n"
+  L"			<text placement=\"attribution\"><![CDATA[Created by Valentin-Gabriel Radu (github.com/valinet)]]></text>\r\n"
+  L"		</binding>\r\n"
+  L"	</visual>\r\n"
+  L"  <actions>\r\n"
+  L"	  <input id=\"tbReply\" type=\"text\" placeHolderContent=\"Send a message to the app\"/>\r\n"
+  L"	  <action content=\"Send\" activationType=\"foreground\" arguments=\"action=reply\"/>\r\n"
+  L"	  <action content=\"Visit GitHub\" activationType=\"protocol\" arguments=\"https://github.com/stehfyn\"/>\r\n"
+  L"	  <action content=\"Close app\" activationType=\"foreground\" arguments=\"action=closeApp\"/>\r\n"
+  L"  </actions>\r\n"
+  L"	<audio src=\"ms-winsoundevent:Notification.Default\" loop=\"false\" silent=\"false\"/>\r\n"
+  L"</toast>\r\n";
+
+static DWORD dwMainThreadId = 0;
+
 static HBITMAP hBitmap;
 static HBITMAP hBitmapBg;
 static HDC     g_hDC;
 static HGLRC   g_hRC;
 static GLuint  g_hTex = 0;
-static BYTE    g_lpPixelBuf[256*256*4];
+static BYTE    g_lpPixelBuf[CAPTURE_REGION*CAPTURE_REGION*4];
 static INT     g_nWidth  = 0;
 static INT     g_nHeight = 0;
 
@@ -69,7 +178,91 @@ NtSetTimerResolution(
 ** 3.5 Static function prototypes
 **===========================================================================*/
 static
+ULONG
+STDMETHODCALLTYPE
+Impl_IGeneric_AddRef(
+  Impl_IGeneric* _this
+);
+
+static
+CFORCEINLINE
+ULONG
+STDMETHODCALLTYPE
+Impl_IGeneric_Release(
+  Impl_IGeneric* _this
+);
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_INotificationActivationCallback_QueryInterface(
+  Impl_IGeneric* _this,
+  REFIID         riid,
+  void**         ppvObject
+);
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_INotificationActivationCallback_Activate(
+  INotificationActivationCallback*    _this,
+  LPCWSTR                             appUserModelId,
+  LPCWSTR                             invokedArgs,
+  const NOTIFICATION_USER_INPUT_DATA* data,
+  ULONG                               count
+);
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_IClassFactory_QueryInterface(
+  Impl_IGeneric* _this,
+  REFIID         riid,
+  void**         ppvObject
+);
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_IClassFactory_LockServer(
+  IClassFactory* _this,
+  BOOL           flock
+);
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_IClassFactory_CreateInstance(
+  IClassFactory* _this,
+  IUnknown*      punkOuter,
+  REFIID         vTableGuid,
+  void**         ppv
+);
+
+#pragma warning(disable : 4113)
+static
+CONST
+INotificationActivationCallbackVtbl Impl_INotificationActivationCallback_Vtbl = {
+  .QueryInterface = Impl_INotificationActivationCallback_QueryInterface,
+  .AddRef         = Impl_IGeneric_AddRef,
+  .Release        = Impl_IGeneric_Release,
+  .Activate       = Impl_INotificationActivationCallback_Activate
+};
+
+static
+CONST
+IClassFactoryVtbl Impl_IClassFactory_Vtbl = {
+  .QueryInterface = Impl_IClassFactory_QueryInterface,
+  .AddRef         = Impl_IGeneric_AddRef,
+  .Release        = Impl_IGeneric_Release,
+  .LockServer     = Impl_IClassFactory_LockServer,
+  .CreateInstance = Impl_IClassFactory_CreateInstance
+};
+#pragma warning(default : 4113)
+
+static
 LRESULT
+CALLBACK
 wndproc(
   HWND   hWnd,
   UINT   msg,
@@ -79,6 +272,7 @@ wndproc(
 
 static
 BOOL
+CALLBACK
 monitorenumproc(
   HMONITOR hMonitor,
   HDC      hDC,
@@ -170,7 +364,159 @@ borderless_on_wm_paint(
 ** 4. Private functions
 **===========================================================================*/
 static
+ULONG
+STDMETHODCALLTYPE
+Impl_IGeneric_AddRef(
+  Impl_IGeneric* _this)
+{
+  return (ULONG) InterlockedIncrement64(&(_this->dwRefCount));
+}
+
+static
+ULONG
+STDMETHODCALLTYPE
+Impl_IGeneric_Release(
+  Impl_IGeneric* _this)
+{
+  LONG64 dwNewRefCount = InterlockedDecrement64(&(_this->dwRefCount));
+  if (!dwNewRefCount) free(_this);
+  return (ULONG) dwNewRefCount;
+}
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_INotificationActivationCallback_QueryInterface(
+  Impl_IGeneric* _this,
+  REFIID         riid,
+  void**         ppvObject)
+{
+  UNREFERENCED_PARAMETER(_this);
+
+  if (!IsEqualIID(riid, &IID_INotificationActivationCallback) && !IsEqualIID(riid, &IID_IUnknown))
+  {
+    *ppvObject = NULL;
+    return E_NOINTERFACE;
+  }
+  *ppvObject = _this;
+  _this->lpVtbl->AddRef((IUnknown*) _this);
+  return S_OK;
+}
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_INotificationActivationCallback_Activate(
+  INotificationActivationCallback*    _this,
+  LPCWSTR                             appUserModelId,
+  LPCWSTR                             invokedArgs,
+  const NOTIFICATION_USER_INPUT_DATA* data,
+  ULONG                               count)
+{
+  UNREFERENCED_PARAMETER(_this);
+  __debugbreak();
+  (VOID) wprintf(
+    L"Interacted with notification from AUMID \"%s\" with arguments: \"%s\". User input count: %lu.\n",
+    appUserModelId,
+    invokedArgs,
+    count
+  );
+  if (!_wcsicmp(invokedArgs, L"action=closeApp"))
+  {
+    (VOID) PostThreadMessage(dwMainThreadId, WM_QUIT, 0, 0);
+  }
+  else if (!_wcsicmp(invokedArgs, L"action=reply"))
+  {
+    for (unsigned long i = 0; i != count; ++i)
+    {
+      if (!_wcsicmp(data[i].Key, L"tbReply"))
+      {
+        (VOID) wprintf(L"Reply was \"%s\".\n", data[i].Value);
+      }
+    }
+  }
+  return S_OK;
+}
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_IClassFactory_QueryInterface(
+  Impl_IGeneric* _this,
+  REFIID         riid,
+  void**         ppvObject)
+{
+  if (!IsEqualIID(riid, &IID_IClassFactory) && !IsEqualIID(riid, &IID_IUnknown))
+  {
+    *ppvObject = NULL;
+    return E_NOINTERFACE;
+  }
+  *ppvObject = _this;
+  _this->lpVtbl->AddRef((IUnknown*) _this);
+  return S_OK;
+}
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_IClassFactory_LockServer(
+  IClassFactory* _this,
+  BOOL           flock)
+{
+  UNREFERENCED_PARAMETER(_this);
+  UNREFERENCED_PARAMETER(flock);
+
+  return S_OK;
+}
+
+static
+HRESULT
+STDMETHODCALLTYPE
+Impl_IClassFactory_CreateInstance(
+  IClassFactory* _this,
+  IUnknown*      punkOuter,
+  REFIID         vTableGuid,
+  void**         ppv)
+{
+  UNREFERENCED_PARAMETER(_this);
+
+  HRESULT        hr      = E_NOINTERFACE;
+  Impl_IGeneric* thisobj = NULL;
+  *ppv = 0;
+
+  if (punkOuter){
+    hr = CLASS_E_NOAGGREGATION;
+  }
+  else
+  {
+    BOOL bOk = FALSE;
+    if (!(thisobj = malloc(sizeof(Impl_IGeneric))))
+    {
+      hr = E_OUTOFMEMORY;
+    }
+    else
+    {
+      thisobj->lpVtbl = (IUnknownVtbl*) &Impl_INotificationActivationCallback_Vtbl;
+      bOk             = TRUE;
+    }
+    if (bOk)
+    {
+      thisobj->dwRefCount = 1;
+      hr                  = thisobj->lpVtbl->QueryInterface((IUnknown*) thisobj, vTableGuid, ppv);
+      thisobj->lpVtbl->Release((IUnknown*) thisobj);
+    }
+    else
+    {
+      return hr;
+    }
+  }
+
+  return hr;
+}
+
+static
 LRESULT
+CALLBACK
 wndproc(
   HWND   hWnd,
   UINT   msg,
@@ -243,6 +589,7 @@ wndproc(
 
 static
 BOOL
+CALLBACK
 monitorenumproc(
   HMONITOR hMonitor,
   HDC      hDC,
@@ -631,6 +978,9 @@ CaptureScreen(
   (void) GetCursorPos(&cursor);
   RECT r = {0};
   (void) GetWindowRect(hWnd, &r);
+  POINT window_center = { 0 };
+  window_center.x = (LONG)(0.5f * (r.right + r.left));
+  window_center.y = (LONG)(0.5f * (r.bottom + r.top));
   //int  nWindowWidth  = labs(r.right - r.left);
   //int  nWindowHeight = labs(r.bottom - r.top);
   //int  nScreenWidth  = GetSystemMetrics(SM_CXSCREEN);
@@ -643,16 +993,16 @@ CaptureScreen(
   {
     hBitmapBg = CreateCompatibleBitmap(
       hDesktopDC,
-      256,
-      256
+      CAPTURE_REGION,
+      CAPTURE_REGION
     );
   }
   if(hBitmapBg)
   {
     BITMAPINFOHEADER bi = {0};
     bi.biSize        =sizeof(BITMAPINFOHEADER);
-    bi.biWidth       = 256;
-    bi.biHeight      = 256; // Negative to flip vertically for OpenGL
+    bi.biWidth       = CAPTURE_REGION;
+    bi.biHeight      = CAPTURE_REGION; // Negative to flip vertically for OpenGL
     bi.biPlanes      =1;
     bi.biBitCount    =32; // RGBA
     bi.biCompression =BI_RGB;
@@ -661,17 +1011,20 @@ CaptureScreen(
       hCaptureDC,
       0,
       0,
-      256,
-      256,
+      CAPTURE_REGION,
+      CAPTURE_REGION,
       hDesktopDC,
       //0,
       //0,
-      max(min(cursor.x - (LONG)(0.5f * 256), 2560 - 256), 0),
-      max(min(cursor.y - (LONG)(0.5f * 256), 1600 - 256), 0),
-      SRCCOPY|CAPTUREBLT
+      //max(min(cursor.x - (LONG)(0.5f * 256), 2560 - 256), 0),
+      //max(min(cursor.y - (LONG)(0.5f * 256), 1600 - 256), 0),
+      max(min(window_center.x - (LONG)(0.5f * CAPTURE_REGION), 2560 - CAPTURE_REGION), 0),
+      max(min(window_center.y - (LONG)(0.5f * CAPTURE_REGION), 1600 - CAPTURE_REGION), 0),
+      //SRCCOPY|CAPTUREBLT
+      SRCCOPY
     );
 
-    GetDIBits(hCaptureDC, hBitmapBg, 0, 256, buf, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+    GetDIBits(hCaptureDC, hBitmapBg, 0, CAPTURE_REGION, buf, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
   }
   //BitBlt(hDC, 0, 0, nScreenWidth, nScreenHeight, hCaptureDC, 0, 0, SRCCOPY);
   //here to save the captured image to disk
@@ -734,6 +1087,290 @@ load_icon(
 /*=============================================================================
 ** 5. Public functions
 **===========================================================================*/
+EXTERN_C
+FORCEINLINE
+BOOL
+w32_init_thunk(
+  BOOL fInvoked)
+{
+  HRESULT        hr                = S_OK;
+  Impl_IGeneric* pClassFactory     = NULL;
+  BOOL           bOk               = FALSE;
+  BOOL           bInvokedFromToast = fInvoked;
+  dwMainThreadId = GetCurrentThreadId();
+  (VOID) bOk;
+
+  /*
+   * Initialize COM and Windows Runtime on this thread. Make sure that the threading models of the two match.
+   */
+  if (SUCCEEDED(hr))
+  {
+    hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+  }
+
+  if (SUCCEEDED(hr))
+  {
+    hr = RoInitialize(RO_INIT_MULTITHREADED);
+  }
+
+  /*
+   * Allocate class factory. This factory produces our implementation of the INotificationActivationCallback interface.
+   * This interface has an ::Activate member method that gets called when someone interacts with the toast notification.
+   */
+  if (SUCCEEDED(hr))
+  {
+    if (!(pClassFactory = malloc(sizeof(Impl_IGeneric)))) hr = E_OUTOFMEMORY;
+    else
+    {
+      pClassFactory->lpVtbl     = (IUnknownVtbl*) &Impl_IClassFactory_Vtbl;
+      pClassFactory->dwRefCount = 1;
+    }
+  }
+  /*
+   * Instead of having to register our COM class in the registry beforehand, we opt to registering it at runtime;
+   * we associate our GUID with the class factory that provides our INotificationActivationCallback interface.
+   */
+  DWORD dwCookie = 0;
+  if (SUCCEEDED(hr))
+  {
+    hr = CoRegisterClassObject(
+      &GUID_Impl_INotificationActivationCallback,
+      (LPUNKNOWN) pClassFactory,
+      CLSCTX_LOCAL_SERVER,
+      REGCLS_MULTIPLEUSE,
+      &dwCookie
+    );
+  }
+
+  /*
+   * Construct the path to our EXE that will be used to launch it when something requests our interface.
+   * As said above, registration is dynamic - as long as this app runs, COM knows about the fact that this
+   * app implements our INotificationActivationCallback interface. The info here is used when this app has
+   * closed and someone clicks the toast notification for example; in that case, since our app is not
+   * running, thus CoRegisterClassObject was not called, COM needs info on what EXE contains the implementation
+   * of the interface, and we specify that here; without setting this, clicking on notifications will do nothing
+   */
+  wchar_t wszExePath[MAX_PATH + 100];
+  ZeroMemory(wszExePath, MAX_PATH + 100);
+  if (SUCCEEDED(hr))
+  {
+    hr = (GetModuleFileNameW(NULL, wszExePath + 1, MAX_PATH) != 0 ? S_OK : E_FAIL);
+  }
+
+  if (SUCCEEDED(hr))
+  {
+    wszExePath[0] = L'"';
+    wcscat_s(wszExePath, MAX_PATH + 100, L"\" " _T(TOAST_ACTIVATED_LAUNCH_ARG));
+  }
+
+  if (SUCCEEDED(hr))
+  {
+    hr = HRESULT_FROM_WIN32(
+      RegSetValueW(
+        HKEY_CURRENT_USER,
+        L"SOFTWARE\\Classes\\CLSID\\{" _T(
+          GUID_Impl_INotificationActivationCallback_Textual
+        ) L"}\\LocalServer32",
+        REG_SZ,
+        wszExePath,
+        (DWORD) wcslen(wszExePath) + 1
+      )
+    );
+  }
+
+  /*
+   * Here we set some info about our app and associate our AUMID with the GUID from above
+   * (the one that is associated with our class factory which produces our INotificationActivationCallback interface)
+   */
+  if (SUCCEEDED(hr))
+  {
+    hr = HRESULT_FROM_WIN32(
+      RegSetKeyValueW(
+        HKEY_CURRENT_USER,
+        L"SOFTWARE\\Classes\\AppUserModelId\\" APP_ID,
+        L"DisplayName",
+        REG_SZ,
+        L"Toast Activator Pure C Example",
+        31 * sizeof(wchar_t)
+      )
+    );
+  }
+
+  if (SUCCEEDED(hr))
+  {
+    hr = HRESULT_FROM_WIN32(
+      RegSetKeyValueW(
+        HKEY_CURRENT_USER,
+        L"SOFTWARE\\Classes\\AppUserModelId\\" APP_ID,
+        L"IconBackgroundColor",
+        REG_SZ,
+        L"FF00FF00",
+        9 * sizeof(wchar_t)
+      )
+    );
+  }
+
+  if (SUCCEEDED(hr))
+  {
+    hr = HRESULT_FROM_WIN32(
+      RegSetKeyValueW(
+        HKEY_CURRENT_USER,
+        L"SOFTWARE\\Classes\\AppUserModelId\\" APP_ID,
+        L"CustomActivator",
+        REG_SZ,
+        L"{" _T(GUID_Impl_INotificationActivationCallback_Textual) L"}",
+        39 * sizeof(wchar_t)
+      )
+    );
+  }
+/*
+ * We will display a notification only when this app is launched standalone (not by interacting with a notification)
+ */
+  HSTRING_HEADER hshAppId;
+  HSTRING        hsAppId = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = WindowsCreateStringReference(
+      APP_ID,
+      (UINT32)(sizeof(APP_ID) / sizeof(TCHAR) - 1),
+      &hshAppId,
+      &hsAppId
+    );
+  }
+
+  HSTRING_HEADER hshToastNotificationManager;
+  HSTRING        hsToastNotificationManager = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr =
+      WindowsCreateStringReference(
+        RuntimeClass_Windows_UI_Notifications_ToastNotificationManager,
+        (UINT32)(sizeof(
+                   RuntimeClass_Windows_UI_Notifications_ToastNotificationManager)
+                 / sizeof(wchar_t) - 1),
+        &hshToastNotificationManager,
+        &hsToastNotificationManager
+      );
+  }
+
+  __x_ABI_CWindows_CUI_CNotifications_CIToastNotificationManagerStatics* pToastNotificationManager =
+    NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = RoGetActivationFactory(
+      hsToastNotificationManager,
+      &IID_IToastNotificationManagerStatics,
+      (LPVOID*)&pToastNotificationManager
+    );
+  }
+
+  __x_ABI_CWindows_CUI_CNotifications_CIToastNotifier* pToastNotifier = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = pToastNotificationManager->lpVtbl->CreateToastNotifierWithId(
+      pToastNotificationManager,
+      hsAppId,
+      &pToastNotifier
+    );
+  }
+
+  HSTRING_HEADER hshToastNotification;
+  HSTRING        hsToastNotification = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = WindowsCreateStringReference(
+      RuntimeClass_Windows_UI_Notifications_ToastNotification,
+      (UINT32)(sizeof(RuntimeClass_Windows_UI_Notifications_ToastNotification) / sizeof(wchar_t) -
+               1),
+      &hshToastNotification,
+      &hsToastNotification
+    );
+  }
+
+  __x_ABI_CWindows_CUI_CNotifications_CIToastNotificationFactory* pNotificationFactory = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = RoGetActivationFactory(
+      hsToastNotification,
+      &IID_IToastNotificationFactory,
+      (LPVOID*)&pNotificationFactory
+    );
+  }
+
+  HSTRING_HEADER hshXmlDocument;
+  HSTRING        hsXmlDocument = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = WindowsCreateStringReference(
+      RuntimeClass_Windows_Data_Xml_Dom_XmlDocument,
+      (UINT32)(sizeof(RuntimeClass_Windows_Data_Xml_Dom_XmlDocument) / sizeof(wchar_t) - 1),
+      &hshXmlDocument,
+      &hsXmlDocument
+    );
+  }
+
+  HSTRING_HEADER hshBanner;
+  HSTRING        hsBanner = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = WindowsCreateStringReference(
+      wszBannerText,
+      (UINT32)(sizeof(wszBannerText) / sizeof(wchar_t) - 1),
+      &hshBanner,
+      &hsBanner
+    );
+  }
+
+  IInspectable* pInspectable = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = RoActivateInstance(hsXmlDocument, &pInspectable);
+  }
+
+  __x_ABI_CWindows_CData_CXml_CDom_CIXmlDocument* pXmlDocument = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = pInspectable->lpVtbl->QueryInterface(pInspectable, &IID_IXmlDocument, &pXmlDocument);
+  }
+
+  __x_ABI_CWindows_CData_CXml_CDom_CIXmlDocumentIO* pXmlDocumentIO = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = pXmlDocument->lpVtbl->QueryInterface(pXmlDocument, &IID_IXmlDocumentIO, &pXmlDocumentIO);
+  }
+
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = pXmlDocumentIO->lpVtbl->LoadXml(pXmlDocumentIO, hsBanner);
+  }
+
+  __x_ABI_CWindows_CUI_CNotifications_CIToastNotification* pToastNotification = NULL;
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = pNotificationFactory->lpVtbl->CreateToastNotification(
+      pNotificationFactory,
+      pXmlDocument,
+      &pToastNotification
+    );
+  }
+
+  if (SUCCEEDED(hr) && !bInvokedFromToast)
+  {
+    hr = pToastNotifier->lpVtbl->Show(pToastNotifier, pToastNotification);
+  }
+
+  return SUCCEEDED(hr);
+}
+
+EXTERN_C
+FORCEINLINE
+BOOL
+w32_release_thunk(
+  VOID)
+{
+  return TRUE;
+}
+
 FORCEINLINE
 LPCTSTR
 w32_create_window_class(
@@ -861,8 +1498,8 @@ w32_get_display_info(
   return EnumDisplayMonitors(
     NULL,
     NULL,
-    (MONITORENUMPROC)monitorenumproc,
-    (LPARAM)displayInfo
+    (MONITORENUMPROC) monitorenumproc,
+    (LPARAM) displayInfo
   );
 }
 
@@ -1018,12 +1655,12 @@ BOOL
 w32_timer_stop(
   w32_timer* tmr)
 {
-  BOOL success = QueryPerformanceCounter(&tmr->stop);
-  LONGLONG e = tmr->stop.QuadPart - tmr->start.QuadPart;
+  BOOL     success = QueryPerformanceCounter(&tmr->stop);
+  LONGLONG e       = tmr->stop.QuadPart - tmr->start.QuadPart;
   if(!isinf(e))
   {
-  tmr->elapsed.QuadPart = e;
-  tmr->elapsedAccum.QuadPart +=e;
+    tmr->elapsed.QuadPart       = e;
+    tmr->elapsedAccum.QuadPart +=e;
   }
   return success;
 }
@@ -1033,10 +1670,10 @@ FORCEINLINE
 DOUBLE
 w32_timer_elapsed(
   w32_timer* tmr)
-  {
-    DOUBLE e = (DOUBLE)tmr->elapsedAccum.QuadPart / (DOUBLE)tmr->freq.QuadPart;
-    return isinf(e) ? 0.0 : e;
-  }
+{
+  DOUBLE e = (DOUBLE)tmr->elapsedAccum.QuadPart / (DOUBLE)tmr->freq.QuadPart;
+  return isinf(e) ? 0.0 : e;
+}
 
 EXTERN_C
 FORCEINLINE
@@ -1044,10 +1681,10 @@ BOOL
 w32_timer_reset(
   w32_timer* tmr)
 {
-  tmr->elapsed.QuadPart = 0;
+  tmr->elapsed.QuadPart      = 0;
   tmr->elapsedAccum.QuadPart = 0;
-  tmr->start.QuadPart = 0;
-  tmr->stop.QuadPart = 0;
+  tmr->start.QuadPart        = 0;
+  tmr->stop.QuadPart         = 0;
   return TRUE;
 }
 
@@ -1162,6 +1799,128 @@ PFNWGLCHOOSEPIXELFORMATARBPROC    wglChoosePixelFormatARB    = NULL;
 PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB = NULL;
 PFNWGLSWAPINTERVALEXTPROC         wglSwapIntervalEXT         = NULL;
 PFNWGLGETSWAPINTERVALEXTPROC      wglGetSwapIntervalEXT      = NULL;
+// OpenGL 2.0 and above function pointers
+typedef void (APIENTRY* PFNGLATTACHSHADERPROC) (GLuint program, GLuint shader);
+typedef void (APIENTRY* PFNGLCOMPILESHADERPROC) (GLuint shader);
+typedef GLuint (APIENTRY* PFNGLCREATEPROGRAMPROC) (void);
+typedef GLuint (APIENTRY* PFNGLCREATESHADERPROC) (GLenum type);
+typedef void (APIENTRY* PFNGLDELETEPROGRAMPROC) (GLuint program);
+typedef void (APIENTRY* PFNGLDELETESHADERPROC) (GLuint shader);
+typedef void (APIENTRY* PFNGLDETACHSHADERPROC) (GLuint program, GLuint shader);
+typedef void (APIENTRY* PFNGLENABLEVERTEXATTRIBARRAYPROC) (GLuint index);
+typedef void (APIENTRY* PFNGLDISABLEVERTEXATTRIBARRAYPROC) (GLuint index);
+typedef void (APIENTRY* PFNGLGENBUFFERSARBPROC) (GLsizei n, GLuint* buffers);
+typedef void (APIENTRY* PFNGLGENVERTEXARRAYSPROC) (GLsizei n, GLuint* arrays);
+typedef void (APIENTRY* PFNGLBINDVERTEXARRAYPROC) (GLuint array);
+typedef void (APIENTRY* PFNGLBUFFERDATAPROC) (
+  GLenum target,
+  GLsizeiptr size,
+  const void* data,
+  GLenum usage
+);
+typedef void (APIENTRY* PFNGLSHADERSOURCEPROC) (
+  GLuint shader,
+  GLsizei count,
+  const GLchar* const* string,
+  const GLint* length
+);
+typedef void (APIENTRY* PFNGLUSEPROGRAMPROC) (GLuint program);
+typedef void (APIENTRY* PFNGLVERTEXATTRIBPOINTERPROC) (
+  GLuint index,
+  GLint size,
+  GLenum type,
+  GLboolean normalized,
+  GLsizei stride,
+  const void* pointer
+);
+typedef void (APIENTRY* PFNGLLINKPROGRAMPROC) (GLuint program);
+typedef void (APIENTRY* PFNGLGETSHADERIVPROC) (GLuint shader, GLenum pname, GLint* params);
+typedef void (APIENTRY* PFNGLGETSHADERINFOLOGPROC) (
+  GLuint shader,
+  GLsizei bufSize,
+  GLsizei* length,
+  GLchar* infoLog
+);
+typedef void (APIENTRY* PFNGLGETPROGRAMIVPROC) (GLuint program, GLenum pname, GLint* params);
+typedef void (APIENTRY* PFNGLGETPROGRAMINFOLOGPROC) (
+  GLuint program,
+  GLsizei bufSize,
+  GLsizei* length,
+  GLchar* infoLog
+);
+typedef GLint (APIENTRY* PFNGLGETUNIFORMLOCATIONPROC) (GLuint program, const GLchar* name);
+typedef void (APIENTRY* PFNGLUNIFORM1FPROC) (GLint location, GLfloat v0);
+
+extern
+PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation;
+extern
+PFNGLUNIFORM1FPROC glUniform1f;
+extern
+PFNGLATTACHSHADERPROC glAttachShader;
+extern
+PFNGLCOMPILESHADERPROC glCompileShader;
+extern
+PFNGLCREATEPROGRAMPROC glCreateProgram;
+extern
+PFNGLCREATESHADERPROC glCreateShader;
+extern
+PFNGLDELETEPROGRAMPROC glDeleteProgram;
+extern
+PFNGLDELETESHADERPROC glDeleteShader;
+extern
+PFNGLDETACHSHADERPROC glDetachShader;
+extern
+PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
+extern
+PFNGLDISABLEVERTEXATTRIBARRAYPROC glDisableVertexAttribArray;
+extern
+PFNGLGENBUFFERSARBPROC glGenBuffers;
+extern
+PFNGLGENVERTEXARRAYSPROC glGenVertexArrays;
+extern
+PFNGLBINDVERTEXARRAYPROC glBindVertexArray;
+extern
+PFNGLBUFFERDATAPROC glBufferData;
+extern
+PFNGLSHADERSOURCEPROC glShaderSource;
+extern
+PFNGLUSEPROGRAMPROC glUseProgram;
+extern
+PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer;
+extern
+PFNGLLINKPROGRAMPROC glLinkProgram;
+extern
+PFNGLGETSHADERIVPROC glGetShaderiv;
+extern
+PFNGLGETSHADERINFOLOGPROC glGetShaderInfoLog;
+extern
+PFNGLGETPROGRAMIVPROC glGetProgramiv;
+extern
+PFNGLGETPROGRAMINFOLOGPROC  glGetProgramInfoLog;
+PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation = NULL;
+PFNGLUNIFORM1FPROC          glUniform1f          = NULL;
+
+PFNGLATTACHSHADERPROC             glAttachShader             = NULL;
+PFNGLCOMPILESHADERPROC            glCompileShader            = NULL;
+PFNGLCREATEPROGRAMPROC            glCreateProgram            = NULL;
+PFNGLCREATESHADERPROC             glCreateShader             = NULL;
+PFNGLDELETEPROGRAMPROC            glDeleteProgram            = NULL;
+PFNGLDELETESHADERPROC             glDeleteShader             = NULL;
+PFNGLDETACHSHADERPROC             glDetachShader             = NULL;
+PFNGLENABLEVERTEXATTRIBARRAYPROC  glEnableVertexAttribArray  = NULL;
+PFNGLDISABLEVERTEXATTRIBARRAYPROC glDisableVertexAttribArray = NULL;
+PFNGLGENBUFFERSARBPROC            glGenBuffers               = NULL;
+PFNGLGENVERTEXARRAYSPROC          glGenVertexArrays          = NULL;
+PFNGLBINDVERTEXARRAYPROC          glBindVertexArray          = NULL;
+PFNGLBUFFERDATAPROC               glBufferData               = NULL;
+PFNGLSHADERSOURCEPROC             glShaderSource             = NULL;
+PFNGLUSEPROGRAMPROC               glUseProgram               = NULL;
+PFNGLVERTEXATTRIBPOINTERPROC      glVertexAttribPointer      = NULL;
+PFNGLLINKPROGRAMPROC              glLinkProgram              = NULL;
+PFNGLGETSHADERIVPROC              glGetShaderiv              = NULL;
+PFNGLGETSHADERINFOLOGPROC         glGetShaderInfoLog         = NULL;
+PFNGLGETPROGRAMIVPROC             glGetProgramiv             = NULL;
+PFNGLGETPROGRAMINFOLOGPROC        glGetProgramInfoLog        = NULL;
 HMODULE                           wgl;
 typedef PROC (__stdcall* _glw32_get_proc_addr)(LPCSTR);
 static _glw32_get_proc_addr wgl_get_proc_address;
@@ -1202,7 +1961,56 @@ w32_wgl_init(
   wglGetSwapIntervalEXT =
     (PFNWGLGETSWAPINTERVALEXTPROC) (LPVOID) wgl_load_proc("wglGetSwapIntervalEXT");
   ASSERT_W32(wglGetSwapIntervalEXT);
-
+  // Load OpenGL 2.0 and above function pointers
+  glAttachShader = (PFNGLATTACHSHADERPROC)(LPVOID)wgl_load_proc("glAttachShader");
+  ASSERT_W32(glAttachShader);
+  glCompileShader = (PFNGLCOMPILESHADERPROC)(LPVOID)wgl_load_proc("glCompileShader");
+  ASSERT_W32(glCompileShader);
+  glCreateProgram = (PFNGLCREATEPROGRAMPROC)(LPVOID)wgl_load_proc("glCreateProgram");
+  ASSERT_W32(glCreateProgram);
+  glCreateShader = (PFNGLCREATESHADERPROC)(LPVOID)wgl_load_proc("glCreateShader");
+  ASSERT_W32(glCreateShader);
+  glDeleteProgram = (PFNGLDELETEPROGRAMPROC)(LPVOID)wgl_load_proc("glDeleteProgram");
+  ASSERT_W32(glDeleteProgram);
+  glDeleteShader = (PFNGLDELETESHADERPROC)(LPVOID)wgl_load_proc("glDeleteShader");
+  ASSERT_W32(glDeleteShader);
+  glDetachShader = (PFNGLDETACHSHADERPROC)(LPVOID)wgl_load_proc("glDetachShader");
+  ASSERT_W32(glDetachShader);
+  glEnableVertexAttribArray =
+    (PFNGLENABLEVERTEXATTRIBARRAYPROC)(LPVOID)wgl_load_proc("glEnableVertexAttribArray");
+  ASSERT_W32(glEnableVertexAttribArray);
+  glDisableVertexAttribArray =
+    (PFNGLDISABLEVERTEXATTRIBARRAYPROC)(LPVOID)wgl_load_proc("glDisableVertexAttribArray");
+  ASSERT_W32(glDisableVertexAttribArray);
+  glGenBuffers = (PFNGLGENBUFFERSARBPROC)(LPVOID)wgl_load_proc("glGenBuffers");
+  ASSERT_W32(glGenBuffers);
+  glGenVertexArrays = (PFNGLGENVERTEXARRAYSPROC)(LPVOID)wgl_load_proc("glGenVertexArrays");
+  ASSERT_W32(glGenVertexArrays);
+  glBindVertexArray = (PFNGLBINDVERTEXARRAYPROC)(LPVOID)wgl_load_proc("glBindVertexArray");
+  ASSERT_W32(glBindVertexArray);
+  glBufferData = (PFNGLBUFFERDATAPROC)(LPVOID)wgl_load_proc("glBufferData");
+  ASSERT_W32(glBufferData);
+  glShaderSource = (PFNGLSHADERSOURCEPROC)(LPVOID)wgl_load_proc("glShaderSource");
+  ASSERT_W32(glShaderSource);
+  glUseProgram = (PFNGLUSEPROGRAMPROC)(LPVOID)wgl_load_proc("glUseProgram");
+  ASSERT_W32(glUseProgram);
+  glVertexAttribPointer =
+    (PFNGLVERTEXATTRIBPOINTERPROC)(LPVOID)wgl_load_proc("glVertexAttribPointer");
+  ASSERT_W32(glVertexAttribPointer);
+  glLinkProgram = (PFNGLLINKPROGRAMPROC)(LPVOID)wgl_load_proc("glLinkProgram");
+  ASSERT_W32(glLinkProgram);
+  glGetShaderiv = (PFNGLGETSHADERIVPROC)(LPVOID)wgl_load_proc("glGetShaderiv");
+  ASSERT_W32(glGetShaderiv);
+  glGetShaderInfoLog = (PFNGLGETSHADERINFOLOGPROC)(LPVOID)wgl_load_proc("glGetShaderInfoLog");
+  ASSERT_W32(glGetShaderInfoLog);
+  glGetProgramiv = (PFNGLGETPROGRAMIVPROC)(LPVOID)wgl_load_proc("glGetProgramiv");
+  ASSERT_W32(glGetProgramiv);
+  glGetProgramInfoLog = (PFNGLGETPROGRAMINFOLOGPROC)(LPVOID)wgl_load_proc("glGetProgramInfoLog");
+  ASSERT_W32(glGetProgramInfoLog);
+  glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)(LPVOID)wgl_load_proc("glGetUniformLocation");
+  ASSERT_W32(glGetUniformLocation);
+  glUniform1f = (PFNGLUNIFORM1FPROC)(LPVOID)wgl_load_proc("glUniform1f");
+  ASSERT_W32(glUniform1f);
   return TRUE;
 }
 
@@ -1301,8 +2109,10 @@ void
 w32_wgl_attach_device(
   w32_window* wnd)
 {
-  PIXELFORMATDESCRIPTOR pfd  = {0};
-  INT                   msaa = w32_wgl_get_pixel_format(16U);
+  PIXELFORMATDESCRIPTOR pfd = {0};
+  //INT                   msaa = w32_wgl_get_pixel_format(16U);
+  //INT msaa = w32_wgl_get_pixel_format(1U);
+  INT msaa = w32_wgl_get_pixel_format(4U);
   pfd.nSize    = sizeof(PIXELFORMATDESCRIPTOR);
   pfd.nVersion = 1;
   pfd.dwFlags  = PFD_DRAW_TO_WINDOW |     // Format Must Support Window
@@ -1324,7 +2134,7 @@ w32_wgl_attach_device(
   g_hRC = hRC;
   g_hDC = hDC;
 
-  (void) memset(g_lpPixelBuf, 0, (size_t)(256*256* 4));
+  (void) memset(g_lpPixelBuf, 0, (size_t)(CAPTURE_REGION*CAPTURE_REGION* 4));
   CaptureScreen(wnd->hWnd, g_lpPixelBuf);
 
   glGenTextures(1, &g_hTex);
@@ -1341,13 +2151,126 @@ w32_wgl_attach_device(
     GL_TEXTURE_2D,
     0,
     GL_BGRA,
-    256,
-    256,
+    CAPTURE_REGION,
+    CAPTURE_REGION,
     0,
     GL_BGRA,
     GL_UNSIGNED_BYTE,
     g_lpPixelBuf
   );
+}
+
+const char* vertexShaderSource =
+  "#version 330 core\n"
+  "layout(location = 0) in vec2 aPos;\n"
+  "layout(location = 1) in vec2 aTexCoord;\n"
+  "out vec2 TexCoord;\n"
+  "void main()\n"
+  "{\n"
+  "    gl_Position = vec4(aPos, 0.0, 1.0);\n"
+  "    TexCoord = aTexCoord;\n"
+  "}\n";
+
+const char* fragmentShaderSource =
+  "#version 330 core\n"
+  "out vec4 FragColor;\n"
+  "in vec2 TexCoord;\n"
+  "uniform sampler2D texture1;\n"
+  "uniform float offset;\n"
+  "uniform float brightness;\n"
+  "uniform float time;\n"
+  "float rand(vec2 co) {\n"
+  "    return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);\n"
+  "}\n"
+  "void main()\n"
+  "{\n"
+  "    float kernel[169] = float[](\n"
+  "        1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0,\n"
+  "        4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0,\n"
+  "        6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0,\n"
+  "        4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0,\n"
+  "        1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0,\n"
+  "        4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0,\n"
+  "        6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0,\n"
+  "        4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0,\n"
+  "        1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0,\n"
+  "        4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0,\n"
+  "        6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0, 24.0 / 8192.0, 36.0 / 8192.0, 24.0 / 8192.0, 6.0 / 8192.0,\n"
+  "        4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0, 16.0 / 8192.0, 24.0 / 8192.0, 16.0 / 8192.0, 4.0 / 8192.0,\n"
+  "        1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0, 4.0 / 8192.0, 6.0 / 8192.0, 4.0 / 8192.0, 1.0 / 8192.0\n"
+  "    );\n"
+  "    vec2 offsets[169] = vec2[](\n"
+  "        vec2(-6,  6) * offset, vec2(-5,  6) * offset, vec2(-4,  6) * offset, vec2(-3,  6) * offset, vec2(-2,  6) * offset, vec2(-1,  6) * offset, vec2(0,  6) * offset, vec2(1,  6) * offset, vec2(2,  6) * offset, vec2(3,  6) * offset, vec2(4,  6) * offset, vec2(5,  6) * offset, vec2(6,  6) * offset,\n"
+  "        vec2(-6,  5) * offset, vec2(-5,  5) * offset, vec2(-4,  5) * offset, vec2(-3,  5) * offset, vec2(-2,  5) * offset, vec2(-1,  5) * offset, vec2(0,  5) * offset, vec2(1,  5) * offset, vec2(2,  5) * offset, vec2(3,  5) * offset, vec2(4,  5) * offset, vec2(5,  5) * offset, vec2(6,  5) * offset,\n"
+  "        vec2(-6,  4) * offset, vec2(-5,  4) * offset, vec2(-4,  4) * offset, vec2(-3,  4) * offset, vec2(-2,  4) * offset, vec2(-1,  4) * offset, vec2(0,  4) * offset, vec2(1,  4) * offset, vec2(2,  4) * offset, vec2(3,  4) * offset, vec2(4,  4) * offset, vec2(5,  4) * offset, vec2(6,  4) * offset,\n"
+  "        vec2(-6,  3) * offset, vec2(-5,  3) * offset, vec2(-4,  3) * offset, vec2(-3,  3) * offset, vec2(-2,  3) * offset, vec2(-1,  3) * offset, vec2(0,  3) * offset, vec2(1,  3) * offset, vec2(2,  3) * offset, vec2(3,  3) * offset, vec2(4,  3) * offset, vec2(5,  3) * offset, vec2(6,  3) * offset,\n"
+  "        vec2(-6,  2) * offset, vec2(-5,  2) * offset, vec2(-4,  2) * offset, vec2(-3,  2) * offset, vec2(-2,  2) * offset, vec2(-1,  2) * offset, vec2(0,  2) * offset, vec2(1,  2) * offset, vec2(2,  2) * offset, vec2(3,  2) * offset, vec2(4,  2) * offset, vec2(5,  2) * offset, vec2(6,  2) * offset,\n"
+  "        vec2(-6,  1) * offset, vec2(-5,  1) * offset, vec2(-4,  1) * offset, vec2(-3,  1) * offset, vec2(-2,  1) * offset, vec2(-1,  1) * offset, vec2(0,  1) * offset, vec2(1,  1) * offset, vec2(2,  1) * offset, vec2(3,  1) * offset, vec2(4,  1) * offset, vec2(5,  1) * offset, vec2(6,  1) * offset,\n"
+  "        vec2(-6,  0) * offset, vec2(-5,  0) * offset, vec2(-4,  0) * offset, vec2(-3,  0) * offset, vec2(-2,  0) * offset, vec2(-1,  0) * offset, vec2(0,  0) * offset, vec2(1,  0) * offset, vec2(2,  0) * offset, vec2(3,  0) * offset, vec2(4,  0) * offset, vec2(5,  0) * offset, vec2(6,  0) * offset,\n"
+  "        vec2(-6, -1) * offset, vec2(-5, -1) * offset, vec2(-4, -1) * offset, vec2(-3, -1) * offset, vec2(-2, -1) * offset, vec2(-1, -1) * offset, vec2(0, -1) * offset, vec2(1, -1) * offset, vec2(2, -1) * offset, vec2(3, -1) * offset, vec2(4, -1) * offset, vec2(5, -1) * offset, vec2(6, -1) * offset,\n"
+  "        vec2(-6, -2) * offset, vec2(-5, -2) * offset, vec2(-4, -2) * offset, vec2(-3, -2) * offset, vec2(-2, -2) * offset, vec2(-1, -2) * offset, vec2(0, -2) * offset, vec2(1, -2) * offset, vec2(2, -2) * offset, vec2(3, -2) * offset, vec2(4, -2) * offset, vec2(5, -2) * offset, vec2(6, -2) * offset,\n"
+  "        vec2(-6, -3) * offset, vec2(-5, -3) * offset, vec2(-4, -3) * offset, vec2(-3, -3) * offset, vec2(-2, -3) * offset, vec2(-1, -3) * offset, vec2(0, -3) * offset, vec2(1, -3) * offset, vec2(2, -3) * offset, vec2(3, -3) * offset, vec2(4, -3) * offset, vec2(5, -3) * offset, vec2(6, -3) * offset,\n"
+  "        vec2(-6, -4) * offset, vec2(-5, -4) * offset, vec2(-4, -4) * offset, vec2(-3, -4) * offset, vec2(-2, -4) * offset, vec2(-1, -4) * offset, vec2(0, -4) * offset, vec2(1, -4) * offset, vec2(2, -4) * offset, vec2(3, -4) * offset, vec2(4, -4) * offset, vec2(5, -4) * offset, vec2(6, -4) * offset,\n"
+  "        vec2(-6, -5) * offset, vec2(-5, -5) * offset, vec2(-4, -5) * offset, vec2(-3, -5) * offset, vec2(-2, -5) * offset, vec2(-1, -5) * offset, vec2(0, -5) * offset, vec2(1, -5) * offset, vec2(2, -5) * offset, vec2(3, -5) * offset, vec2(4, -5) * offset, vec2(5, -5) * offset, vec2(6, -5) * offset,\n"
+  "        vec2(-6, -6) * offset, vec2(-5, -6) * offset, vec2(-4, -6) * offset, vec2(-3, -6) * offset, vec2(-2, -6) * offset, vec2(-1, -6) * offset, vec2(0, -6) * offset, vec2(1, -6) * offset, vec2(2, -6) * offset, vec2(3, -6) * offset, vec2(4, -6) * offset, vec2(5, -6) * offset, vec2(6, -6) * offset\n"
+  "    );\n"
+  "    vec4 color = vec4(0.0);\n"
+  "    for (int i = 0; i < 169; i++)\n"
+  "    {\n"
+  "        color += texture(texture1, TexCoord + offsets[i]) * kernel[i];\n"
+  "    }\n"
+  "    color *= brightness;\n"
+  "    color.a = 1.0; // Set alpha to maximum\n"
+  "    // Add noise\n"
+  "    //float noise = rand(TexCoord + time) * 0.1;\n"
+  "    //color.rgb += noise;\n"
+  "    FragColor = color;\n"
+  "}\n";
+
+static
+CFORCEINLINE
+GLuint
+w32_create_shader(
+  const char* source,
+  GLenum      type)
+{
+  GLuint shader = glCreateShader(type);
+  glShaderSource(shader, 1, &source, NULL);
+  glCompileShader(shader);
+  GLint success;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+  if (!success) {
+    char infoLog[512];
+    glGetShaderInfoLog(shader, 512, NULL, infoLog);
+    printf("ERROR::SHADER::COMPILATION_FAILED\n%s\n", infoLog);
+  }
+
+  return shader;
+}
+
+static
+CFORCEINLINE
+GLuint
+w32_create_program(
+  const char* vertexSource,
+  const char* fragmentSource)
+{
+  GLuint vertexShader   = w32_create_shader(vertexSource, GL_VERTEX_SHADER);
+  GLuint fragmentShader = w32_create_shader(fragmentSource, GL_FRAGMENT_SHADER);
+  GLuint shaderProgram  = glCreateProgram();
+  glAttachShader(shaderProgram, vertexShader);
+  glAttachShader(shaderProgram, fragmentShader);
+  glLinkProgram(shaderProgram);
+  GLint success;
+  glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
+  if (!success) {
+    char infoLog[512];
+    glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
+    printf("ERROR::SHADER::PROGRAM::LINKING_FAILED\n%s\n", infoLog);
+  }
+  glDeleteShader(vertexShader);
+  glDeleteShader(fragmentShader);
+  return shaderProgram;
 }
 
 EXTERN_C
@@ -1356,23 +2279,26 @@ void
 wender(
   w32_window* wnd)
 {
-  static w32_timer* rt = NULL;
-  static w32_timer* ft = NULL;
-  static w32_timer* cam = NULL;
-  static w32_timer* gdi = NULL;
-  static w32_timer* upload = NULL;
-  static w32_timer* quad = NULL;
-  static w32_timer* swap = NULL;
-  static int samples = 0;
+  static w32_timer* rt      = NULL;
+  static w32_timer* ft      = NULL;
+  static w32_timer* cam     = NULL;
+  static w32_timer* gdi     = NULL;
+  static w32_timer* upload  = NULL;
+  static w32_timer* quad    = NULL;
+  static w32_timer* swap    = NULL;
+  static int        samples = 0;
+  static GLuint     shader;
   if(!rt)
   {
-    rt = malloc(sizeof(w32_timer));
-    ft = malloc(sizeof(w32_timer));
-    cam = malloc(sizeof(w32_timer));
-    gdi = malloc(sizeof(w32_timer));
+    SetWindowDisplayAffinity(wnd->hWnd, WDA_EXCLUDEFROMCAPTURE);
+    shader = w32_create_program(vertexShaderSource, fragmentShaderSource);
+    rt     = malloc(sizeof(w32_timer));
+    ft     = malloc(sizeof(w32_timer));
+    cam    = malloc(sizeof(w32_timer));
+    gdi    = malloc(sizeof(w32_timer));
     upload = malloc(sizeof(w32_timer));
-    quad = malloc(sizeof(w32_timer));
-    swap = malloc(sizeof(w32_timer));
+    quad   = malloc(sizeof(w32_timer));
+    swap   = malloc(sizeof(w32_timer));
     ASSERT_W32(rt);
     ASSERT_W32(ft);
     ASSERT_W32(cam);
@@ -1389,7 +2315,7 @@ wender(
     w32_timer_init(swap);
     w32_timer_start(rt);
   }
-  
+
 
   w32_timer_start(ft);
 
@@ -1407,9 +2333,9 @@ wender(
   //(void) memset(g_lpPixelBuf, 125, (size_t)(256*256*4));
   w32_timer_start(gdi);
   CaptureScreen(wnd->hWnd, g_lpPixelBuf);
-  for (int i = 0; i < 256; ++i)
-    for (int j = 0; j < 256; ++j)
-      g_lpPixelBuf[((j + (i * 256)) * 4) + 3] = 225;   // Alpha is at offset 3
+  //for (int i = 0; i < 256; ++i)
+  //  for (int j = 0; j < 256; ++j)
+  //    g_lpPixelBuf[((j + (i * 256)) * 4) + 3] = 225;   // Alpha is at offset 3
   w32_timer_stop(gdi);
 
   w32_timer_start(upload);
@@ -1423,8 +2349,8 @@ wender(
     0,
     0,
     0,
-    256,
-    256,
+    CAPTURE_REGION,
+    CAPTURE_REGION,
     GL_BGRA,
     GL_UNSIGNED_BYTE,
     g_lpPixelBuf
@@ -1436,17 +2362,48 @@ wender(
 
   // Draw a textured quad
   w32_timer_start(quad);
+  glUseProgram(shader);
+  float offset = 1.0f / 256.0f; // Adjust based on your texture size
+  glUniform1f(glGetUniformLocation(shader, "offset"), offset);
+  float brightness         = 3.0f; // Adjust to control brightness
+  GLint brightnessLocation = glGetUniformLocation(shader, "brightness");
+  glUniform1f(brightnessLocation, brightness);
+  // Set the time uniform (update this every frame)
+  //float time         = (float)255; // Assuming you are using GLFW for timing
+  float time         = (float)42536287; // Assuming you are using GLFW for timing
+  GLint timeLocation = glGetUniformLocation(shader, "time");
+  glUniform1f(timeLocation, time);
+  // Set up vertex data (and buffer(s)) and configure vertex attributes
+  GLfloat vertices[] = {
+    // positions    // texture coords
+    -1.0f, -1.0f,  0.0f, 0.0f,
+    1.0f, -1.0f,  1.0f, 0.0f,
+    1.0f,  1.0f,  1.0f, 1.0f,
+    -1.0f,  1.0f,  0.0f, 1.0f
+  };
 
-  glBegin(GL_QUADS);
-  glTexCoord2f(0.0f, 0.0f);
-  glVertex2f(-1.0f, -1.0f);           // Bottom-left
-  glTexCoord2f(1.0f, 0.0f);
-  glVertex2f(1.0f, -1.0f);           // Bottom-right
-  glTexCoord2f(1.0f, 1.0f);
-  glVertex2f(1.0f,1.0f);           // Top-right
-  glTexCoord2f(0.0f, 1.0f);
-  glVertex2f(-1.0f,1.0f);           // Top-left
-  glEnd();
+  GLuint indices[] = {
+    0, 1, 2,
+    2, 3, 0
+  };
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), vertices);
+  glEnableVertexAttribArray(0);
+  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), vertices + 2);
+  glEnableVertexAttribArray(1);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, indices);
+  glDisableVertexAttribArray(0);
+  glDisableVertexAttribArray(1);
+  glUseProgram(0);
+  //glBegin(GL_QUADS);
+  //glTexCoord2f(0.0f, 0.0f);
+  //glVertex2f(-1.0f, -1.0f);           // Bottom-left
+  //glTexCoord2f(1.0f, 0.0f);
+  //glVertex2f(1.0f, -1.0f);           // Bottom-right
+  //glTexCoord2f(1.0f, 1.0f);
+  //glVertex2f(1.0f,1.0f);           // Top-right
+  //glTexCoord2f(0.0f, 1.0f);
+  //glVertex2f(-1.0f,1.0f);           // Top-left
+  //glEnd();
 
   // Disable texturing
   glDisable(GL_TEXTURE_2D);
@@ -1461,27 +2418,28 @@ wender(
   if(w32_timer_elapsed(rt) < 0.0 || (w32_timer_elapsed(rt) >= 1.0))
   //if(samples >= 60)
   {
-    double _rt = w32_timer_elapsed(rt);
-    double _ft = w32_timer_elapsed(ft);
-    double _cam = w32_timer_elapsed(cam);
-    double _gdi = w32_timer_elapsed(gdi);
-    double _upload = w32_timer_elapsed(upload);
-    double _quad = w32_timer_elapsed(quad);
-    double _swap = w32_timer_elapsed(swap);
-    char buf[256] = {0};
-    sprintf(buf, 
-    "    rt: %lf\n    ft: %lf\n   cam: %lf\n   gdi: %lf\nupload: %lf\n  quad: %lf\n  swap: %lf\n",
-    _rt,
-    _ft / samples,
-    _cam / samples,
-    _gdi / samples,
-    _upload / samples,
-    _quad / samples,
-    _swap / samples
+    double _rt      = w32_timer_elapsed(rt);
+    double _ft      = w32_timer_elapsed(ft);
+    double _cam     = w32_timer_elapsed(cam);
+    double _gdi     = w32_timer_elapsed(gdi);
+    double _upload  = w32_timer_elapsed(upload);
+    double _quad    = w32_timer_elapsed(quad);
+    double _swap    = w32_timer_elapsed(swap);
+    char   buf[256] = {0};
+    sprintf(
+      buf,
+      "    rt: %lf\n    ft: %lf\n   cam: %lf\n   gdi: %lf\nupload: %lf\n  quad: %lf\n  swap: %lf\n",
+      _rt,
+      _ft / samples,
+      _cam / samples,
+      _gdi / samples,
+      _upload / samples,
+      _quad / samples,
+      _swap / samples
     );
     samples = 0;
-    //fwrite(buf, 1, strlen(buf), stdout);
-    printf("%s", buf);
+    fwrite(buf, 1, strlen(buf), stdout);
+    //printf("%s", buf);
     w32_timer_reset(rt);
     w32_timer_reset(ft);
     w32_timer_reset(cam);

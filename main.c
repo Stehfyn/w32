@@ -1,4 +1,5 @@
 #include "w32.h"
+#include <stdlib.h>
 
 int
 dubyamain(
@@ -9,6 +10,8 @@ int
 main(
   void)
 {
+  w32_init_thunk(__argc > 1);
+
   return dubyamain();
 }
 
@@ -24,21 +27,24 @@ WinMain(
   UNREFERENCED_PARAMETER(hPrevInstance);
   UNREFERENCED_PARAMETER(lpCmdLine);
   UNREFERENCED_PARAMETER(nShowCmd);
+  w32_init_thunk(__argc > 1);
   return dubyamain();
 }
+
 int
 dubyamain(
   void)
 {
+
   BOOL          result  = FALSE;
   w32_window    wnd     = {0};
   POINT         start   = {0};
   SIZE          sz      = {600, 340};
   LARGE_INTEGER dueTime = {0};
   //__int64       TIMEOUT = 16'7;
-  __int64       TIMEOUT = 30'0;
+  __int64 TIMEOUT = 30'0;
   //__int64       TIMEOUT = 8'0;
-  __int64       COEFF   = -100'0;
+  __int64 COEFF = -100'0;
   (void) w32_set_process_dpiaware();
   (void) GetCursorPos(&start);
   (void) w32_get_centered_window_point(&start, &sz);
@@ -63,7 +69,6 @@ dubyamain(
     NULL
   );
   w32_wgl_attach_device(&wnd);
-
   (void) w32_set_alpha_composition(&wnd, TRUE);
   if (result)
   {
@@ -82,7 +87,7 @@ dubyamain(
           if(!w32_pump_message_loop(&wnd, NULL))
             break;
           wender(&wnd);
-          Sleep(15);
+          Sleep(0);
           //(void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
         }
       }

@@ -96,6 +96,20 @@ typedef struct _w32_display_info {
 
 EXTERN_C
 FORCEINLINE
+BOOL
+w32_init_thunk(
+  BOOL fInvoked
+);
+
+EXTERN_C
+FORCEINLINE
+BOOL
+  w32_release_thunk(
+  VOID
+  );
+
+EXTERN_C
+FORCEINLINE
 LPCTSTR
 w32_create_window_class(
   LPCTSTR lpszClassName,
