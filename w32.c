@@ -1110,35 +1110,6 @@ w32_borderless_wndproc(
 }
 
 EXTERN_C
-FORCEINLINE
-BOOL
-w32_get_user_state(
-  w32_user_state* us)
-{
-  ULONG_PTR pbi[6];
-  ULONG     ulSize = 0;
-  (VOID) GetCursorPos(&us->cursor);
-  us->monitorInfo.cbSize = sizeof(MONITORINFO);
-  (VOID) GetMonitorInfo(MonitorFromPoint(us->cursor, MONITOR_DEFAULTTONEAREST), &us->monitorInfo);
-  if(NtQueryInformationProcess(
-       GetCurrentProcess(),
-       0,
-       &pbi,
-       sizeof(pbi),
-       &ulSize
-     ) >= 0 && ulSize == sizeof(pbi))
-  {
-    DWORD size = 300;
-    us->piActiveProcessID = pbi[5];
-    HANDLE p = OpenProcess(PROCESS_ALL_ACCESS, FALSE, (DWORD) us->piActiveProcessID);
-    (VOID) QueryFullProcessImageNameW(p, 0, us->imageName, &size);
-    return TRUE;
-  }
-  us->piActiveProcessID = (ULONG_PTR)-1;
-  return FALSE;
-}
-
-EXTERN_C
 CFORCEINLINE
 BOOL
 w32_get_centered_window_point(
