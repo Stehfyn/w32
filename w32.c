@@ -153,11 +153,12 @@ wndproc(
       SetLastError(NO_ERROR);
       offset = SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR) user_data);
       ASSERT_W32((0 == offset) && (NO_ERROR == GetLastError()));
+      UINT gay = 0;
+      (void)SetTimer(hWnd, (UINT_PTR)&gay, 10 * USER_TIMER_MINIMUM, NULL);
     }
     else
     {
       w32_window* wnd = (w32_window*) GetWindowLongPtr(hWnd, GWLP_USERDATA);
-
       if (wnd)
       {
         if(wnd->lpfnWndProcOverride)
@@ -440,8 +441,40 @@ on_erasebkgnd(
 {
     UNREFERENCED_PARAMETER(hWnd);
     UNREFERENCED_PARAMETER(hDC);
+    DwmFlush();
 
     return 1U;
+}
+void __forceinline ApplyBlur(BYTE* pixels, int width, int height, int stride, int radius) {
+  int r, g, b;
+  int kernelSize = radius * 2 + 1;
+  int kernelArea = kernelSize * kernelSize;
+
+  BYTE* temp = (BYTE*)malloc(stride * height);
+  memcpy(temp, pixels, stride * height);
+
+  for (int y = radius; y < height - radius; ++y) {
+    for (int x = radius; x < width - radius; ++x) {
+      r = g = b = 0;
+
+      // Apply box blur kernel
+      for (int ky = -radius; ky <= radius; ++ky) {
+        for (int kx = -radius; kx <= radius; ++kx) {
+          int pixelIndex = ((y + ky) * stride) + ((x + kx) * 4);
+          b += temp[pixelIndex];
+          g += temp[pixelIndex + 1];
+          r += temp[pixelIndex + 2];
+        }
+      }
+
+      int outputIndex = (y * stride) + (x * 4);
+      pixels[outputIndex] = (BYTE)(b / kernelArea);
+      pixels[outputIndex + 1] = (BYTE)(g / kernelArea);
+      pixels[outputIndex + 2] = (BYTE)(r / kernelArea);
+    }
+  }
+
+  free(temp);
 }
 void __forceinline
 capture_screen(HWND hWnd, HDC hdc)
@@ -459,42 +492,74 @@ capture_screen(HWND hWnd, HDC hdc)
     );
     if(hBitmapBg)
     {
-      BITMAPINFOHEADER bi = { 0 };
-      bi.biSize = sizeof(BITMAPINFOHEADER);
-      bi.biWidth = labs(r.right - r.left);
-      bi.biHeight = labs(r.bottom - r.top); // Negative to flip vertically for OpenGL
-      bi.biPlanes = 1;
-      bi.biBitCount = 32; // RGBA
-      bi.biCompression = BI_RGB;
-      SelectObject(hCaptureDC, hBitmapBg);
-      BitBlt(
-        hCaptureDC,
-        0,
-        0,
-        labs(r.right - r.left),
-        labs(r.bottom - r.top),
-        hDesktopDC,
-        r.left,
-        r.top,
-        SRCCOPY | CAPTUREBLT
-      );
-      //SelectObject(hdc, hBitmapBg);
-      BitBlt(
-        hdc,
-        0,
-        0,
-        labs(r.right - r.left),
-        labs(r.bottom - r.top),
-        hCaptureDC,
-        0,
-        0,
-        SRCCOPY
-      );
+      //BITMAPINFOHEADER bi = { 0 };
+      //bi.biSize = sizeof(BITMAPINFOHEADER);
+      //bi.biWidth = labs(r.right - r.left);
+      //bi.biHeight = labs(r.bottom - r.top); // Negative to flip vertically for OpenGL
+      //bi.biPlanes = 1;
+      //bi.biBitCount = 32; // RGBA
+      //bi.biCompression = BI_RGB;
+      BITMAPINFO bmi = { 0 };
+      bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      bmi.bmiHeader.biWidth = labs(r.right - r.left);
+      bmi.bmiHeader.biHeight = -labs(r.bottom - r.top); // Negative for top-down DIB
+      bmi.bmiHeader.biPlanes = 1;
+      bmi.bmiHeader.biBitCount = 32;
+      bmi.bmiHeader.biCompression = BI_RGB;
+      //SelectObject(hCaptureDC, hBitmapBg);
+      //BitBlt(
+      //  hCaptureDC,
+      //  0,
+      //  0,
+      //  labs(r.right - r.left),
+      //  labs(r.bottom - r.top),
+      //  hDesktopDC,
+      //  r.left,
+      //  r.top,
+      //  SRCCOPY | CAPTUREBLT
+      //);
+    BYTE* pixels = NULL;
+    HBITMAP hDIBBitmap = CreateDIBSection(hDesktopDC, &bmi, DIB_RGB_COLORS, (void**)&pixels, NULL, 0);
+    SelectObject(hCaptureDC, hDIBBitmap);
+
+    // Copy the captured bitmap into the DIB section
+    BitBlt(hCaptureDC, 0, 0, labs(r.right - r.left), labs(r.bottom - r.top), hDesktopDC, r.left, r.top, SRCCOPY | CAPTUREBLT);
+
+    ApplyBlur(pixels, labs(r.right - r.left), labs(r.bottom - r.top), labs(r.right - r.left) * 4, 10);
+    SetDIBitsToDevice(
+      hdc,
+      0,
+      0,
+      labs(r.right - r.left),
+      labs(r.bottom - r.top),
+      0,
+      0,
+      0,
+      labs(r.bottom - r.top),
+      (const void*)pixels,
+      &bmi,
+      DIB_RGB_COLORS
+    );
+    //SelectObject(hdc, hDIBBitmap);
+    
+    //BitBlt(
+    //  hdc,
+    //  0,
+    //  0,
+    //  labs(r.right - r.left),
+    //  labs(r.bottom - r.top),
+    //  hDesktopDC,
+    //  0,
+    //  0,
+    //  SRCCOPY
+    //);
     }
+
     ReleaseDC(hDesktopWnd, hDesktopDC);
     DeleteDC(hCaptureDC);
     DeleteObject(hBitmapBg);
 }
+
 VOID CFORCEINLINE
 on_paint(
     HWND hWnd)
@@ -503,7 +568,16 @@ on_paint(
     HDC hdc = BeginPaint(hWnd, &ps);
     DWORD dwmColor = 0;
     BOOL isOpaque = FALSE;
+
+    //// Create a rectangular clipping region based on the client area
+    //HRGN hClipRegion = CreateRectRgn(-1,-1,-1,-1);
+    //// Select the clipping region into the HDC
+    //SelectObject(hdc, hClipRegion);
+    //PaintDesktop(hdc);
+    //capture_screen(hWnd, hdc);
     capture_screen(hWnd, hdc);
+    //DeleteObject(hClipRegion);
+
     if (SUCCEEDED(DwmGetColorizationColor(&dwmColor, &isOpaque))) {
       COLORREF color = BGR(dwmColor);
 
@@ -517,7 +591,7 @@ on_paint(
       DeleteObject(brush);
 
       // Blend the memory DC with the main DC using AlphaBlend
-      BLENDFUNCTION blend = { AC_SRC_OVER, 0, 128, AC_SRC_ALPHA };
+      BLENDFUNCTION blend = { AC_SRC_OVER, 0, 128, 0 };
       AlphaBlend(hdc, 0, 0, ps.rcPaint.right, ps.rcPaint.bottom,
         memDC, 0, 0, ps.rcPaint.right, ps.rcPaint.bottom, blend);
 
@@ -527,7 +601,7 @@ on_paint(
       DeleteDC(memDC);
     }
     EndPaint(hWnd, &ps);
-    DwmFlush();
+    //DwmFlush();
     FORWARD_WM_PAINT(hWnd, DefWindowProc);
 }
 
@@ -857,15 +931,19 @@ w32_borderless_wndproc(
     //  (void) SetTimer(hWnd, (UINT_PTR)0, USER_TIMER_MINIMUM, NULL);
     //  return 0;
     //}
-    //case (WM_TIMER): {
-    //  static w32_window* wnd = NULL;
-    //  if(!wnd){
-    //
-    //    wnd = (w32_window*) GetWindowLongPtr(hWnd, GWLP_USERDATA);
-    //  }
-    //  //on_paint(hWnd);
-    //  return 0;
-    //}
+    case (WM_TIMER): {
+      //`static w32_window* wnd = NULL;
+      //`if(!wnd){
+      //`
+      //`  wnd = (w32_window*) GetWindowLongPtr(hWnd, GWLP_USERDATA);
+      //`}
+      //RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE);
+      //UpdateWindow(hWnd);
+      RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+      //RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_INVALIDATE);
+      //on_paint(hWnd);
+      return 0;
+    }
     //case (WM_EXITSIZEMOVE): {
     //  (void) KillTimer(hWnd, (UINT_PTR)0);
     //  return 0;
