@@ -153,8 +153,6 @@ wndproc(
       SetLastError(NO_ERROR);
       offset = SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR) user_data);
       ASSERT_W32((0 == offset) && (NO_ERROR == GetLastError()));
-      UINT gay = 0;
-      (void)SetTimer(hWnd, (UINT_PTR)&gay, 10 * USER_TIMER_MINIMUM, NULL);
     }
     else
     {
@@ -359,7 +357,21 @@ on_activate(
         0,
         0,
         0,
-        SWP_FRAMECHANGED | SWP_NOSIZE | SWP_NOMOVE
+        SWP_FRAMECHANGED | SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW
+      ); 
+      INT backdropType = DWMSBT_TRANSIENTWINDOW;
+      DwmSetWindowAttribute(
+        hWnd,
+        DWMWA_SYSTEMBACKDROP_TYPE,
+        &backdropType,
+        sizeof(INT)
+      );
+      DWM_WINDOW_CORNER_PREFERENCE cornerPreference = 1;
+      DwmSetWindowAttribute(
+        hWnd,
+        DWMWA_WINDOW_CORNER_PREFERENCE,
+        &cornerPreference,
+        sizeof(cornerPreference)
       );
     }
 }
@@ -476,90 +488,13 @@ void __forceinline ApplyBlur(BYTE* pixels, int width, int height, int stride, in
 
   free(temp);
 }
-void __forceinline
-capture_screen(HWND hWnd, HDC hdc)
-{
-    HBITMAP hBitmapBg = NULL;
-    HWND hDesktopWnd = GetDesktopWindow();
-    HDC  hDesktopDC = GetDC(hDesktopWnd);
-    HDC  hCaptureDC = CreateCompatibleDC(hDesktopDC);
-    RECT r;
-    GetWindowRect(hWnd, &r);
-    hBitmapBg = CreateCompatibleBitmap(
-      hDesktopDC,
-      labs(r.right - r.left),
-      labs(r.bottom - r.top)
-    );
-    if(hBitmapBg)
-    {
-      //BITMAPINFOHEADER bi = { 0 };
-      //bi.biSize = sizeof(BITMAPINFOHEADER);
-      //bi.biWidth = labs(r.right - r.left);
-      //bi.biHeight = labs(r.bottom - r.top); // Negative to flip vertically for OpenGL
-      //bi.biPlanes = 1;
-      //bi.biBitCount = 32; // RGBA
-      //bi.biCompression = BI_RGB;
-      BITMAPINFO bmi = { 0 };
-      bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-      bmi.bmiHeader.biWidth = labs(r.right - r.left);
-      bmi.bmiHeader.biHeight = -labs(r.bottom - r.top); // Negative for top-down DIB
-      bmi.bmiHeader.biPlanes = 1;
-      bmi.bmiHeader.biBitCount = 32;
-      bmi.bmiHeader.biCompression = BI_RGB;
-      //SelectObject(hCaptureDC, hBitmapBg);
-      //BitBlt(
-      //  hCaptureDC,
-      //  0,
-      //  0,
-      //  labs(r.right - r.left),
-      //  labs(r.bottom - r.top),
-      //  hDesktopDC,
-      //  r.left,
-      //  r.top,
-      //  SRCCOPY | CAPTUREBLT
-      //);
-    BYTE* pixels = NULL;
-    HBITMAP hDIBBitmap = CreateDIBSection(hDesktopDC, &bmi, DIB_RGB_COLORS, (void**)&pixels, NULL, 0);
-    SelectObject(hCaptureDC, hDIBBitmap);
 
-    // Copy the captured bitmap into the DIB section
-    BitBlt(hCaptureDC, 0, 0, labs(r.right - r.left), labs(r.bottom - r.top), hDesktopDC, r.left, r.top, SRCCOPY | CAPTUREBLT);
-
-    ApplyBlur(pixels, labs(r.right - r.left), labs(r.bottom - r.top), labs(r.right - r.left) * 4, 10);
-    SetDIBitsToDevice(
-      hdc,
-      0,
-      0,
-      labs(r.right - r.left),
-      labs(r.bottom - r.top),
-      0,
-      0,
-      0,
-      labs(r.bottom - r.top),
-      (const void*)pixels,
-      &bmi,
-      DIB_RGB_COLORS
-    );
-    //SelectObject(hdc, hDIBBitmap);
-    
-    //BitBlt(
-    //  hdc,
-    //  0,
-    //  0,
-    //  labs(r.right - r.left),
-    //  labs(r.bottom - r.top),
-    //  hDesktopDC,
-    //  0,
-    //  0,
-    //  SRCCOPY
-    //);
-    }
-
-    ReleaseDC(hDesktopWnd, hDesktopDC);
-    DeleteDC(hCaptureDC);
-    DeleteObject(hBitmapBg);
+void __forceinline DeflateRectByPixels(RECT* rect, int nPixels) {
+  rect->left   += nPixels;
+  rect->top    += nPixels;
+  rect->right  -= nPixels;
+  rect->bottom -= nPixels;
 }
-
 VOID CFORCEINLINE
 on_paint(
     HWND hWnd)
@@ -569,14 +504,7 @@ on_paint(
     DWORD dwmColor = 0;
     BOOL isOpaque = FALSE;
 
-    //// Create a rectangular clipping region based on the client area
-    //HRGN hClipRegion = CreateRectRgn(-1,-1,-1,-1);
-    //// Select the clipping region into the HDC
-    //SelectObject(hdc, hClipRegion);
-    //PaintDesktop(hdc);
     //capture_screen(hWnd, hdc);
-    capture_screen(hWnd, hdc);
-    //DeleteObject(hClipRegion);
 
     if (SUCCEEDED(DwmGetColorizationColor(&dwmColor, &isOpaque))) {
       COLORREF color = BGR(dwmColor);
@@ -584,7 +512,33 @@ on_paint(
       HDC memDC = CreateCompatibleDC(hdc);
       HBITMAP memBitmap = CreateCompatibleBitmap(hdc, ps.rcPaint.right, ps.rcPaint.bottom);
       HGDIOBJ oldBitmap = SelectObject(memDC, memBitmap);
+      BITMAPINFO bmi = { 0 };
+      bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      bmi.bmiHeader.biWidth = labs(ps.rcPaint.right - ps.rcPaint.left);
+      bmi.bmiHeader.biHeight = -labs(ps.rcPaint.bottom - ps.rcPaint.top); // Negative for top-down DIB
+      bmi.bmiHeader.biPlanes = 1;
+      bmi.bmiHeader.biBitCount = 32;
+      bmi.bmiHeader.biCompression = BI_RGB;
+      RGBQUAD bitmapBits = { 0x01, 0x01, 0x01, 0xFF };
 
+      StretchDIBits(memDC, 0, 0, labs(ps.rcPaint.right - ps.rcPaint.left), labs(ps.rcPaint.bottom - ps.rcPaint.top),
+        0, 0, 1, 1, &bitmapBits, &bmi,
+        DIB_RGB_COLORS, SRCPAINT);
+      //SelectObject(hCaptureDC, hBitmapBg);
+      BitBlt(
+        hdc,
+        0,
+        0,
+        labs(ps.rcPaint.right - ps.rcPaint.left),
+        labs(ps.rcPaint.bottom - ps.rcPaint.top),
+        memDC,
+        0,
+        0,
+        SRCCOPY
+      );
+      //StretchDIBits(hdc, 0, 0, labs(ps.rcPaint.right - ps.rcPaint.left), labs(ps.rcPaint.bottom - ps.rcPaint.top),
+      //  0, 0, 1, 1, &bitmapBits, &bmi,
+      //  DIB_RGB_COLORS, SRCPAINT);
       // Fill the memory DC with the DWM color
       HBRUSH brush = CreateSolidBrush(color);
       FillRect(memDC, &ps.rcPaint, brush);
@@ -598,10 +552,74 @@ on_paint(
       // Cleanup
       SelectObject(memDC, oldBitmap);
       DeleteObject(memBitmap);
+      DeleteObject(oldBitmap);
       DeleteDC(memDC);
     }
+RECT r;
+if(GetClientRect(hWnd, &r))
+{
+  HDC memDC = CreateCompatibleDC(hdc);
+  HBITMAP maskBitmap = CreateCompatibleBitmap(hdc, 300, 100);
+  //HBITMAP oldBitmap = SelectObject(memDC, maskBitmap);
+  RECT rcPaint;
+  rcPaint.left = r.left;
+  rcPaint.top = r.top;
+  rcPaint.right = r.left + 300;
+  rcPaint.bottom = r.top + 100;
+  CHAR text[] = "w32_demo";
+  // Draw the text into the bitmap as a mask
+  SetBkMode(hdc, TRANSPARENT);
+  SetTextColor(hdc, RGB(0, 0, 0)); // White text
+  DrawTextA(hdc, text, -1, &rcPaint, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+  //MaskBlt(hdc, 0, 0, 300, 100,
+  //  memDC, 0, 0, maskBitmap, 0, 0,
+  //  MAKEROP4(0x00AA0029, SRCCOPY));
+
+
+
+#if 0
+  BITMAPINFO bmi = { 0 };
+  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth = labs(ps.rcPaint.right - ps.rcPaint.left);
+  bmi.bmiHeader.biHeight = -labs(ps.rcPaint.bottom - ps.rcPaint.top); // Negative for top-down DIB
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+  RGBQUAD bitmapBits = { 0x0, 0x0, 0x0, 0xFF };
+  
+  StretchDIBits(memDC, 0, 0, 300, 100,
+    0, 0, 1, 1, &bitmapBits, &bmi,
+    DIB_RGB_COLORS, SRCCOPY);
+  // Set up text rendering
+  SetTextColor(memDC, RGB(255, 255, 255)); // White text
+  SetBkMode(memDC, TRANSPARENT);
+  
+
+  // Blend the mask (text) onto the original DC
+  //BitBlt(hdc, rcPaint.left, rcPaint.top, 300, 100, memDC, 0, 0, SRCPAINT);
+  MaskBlt(hdc, rcPaint.left, rcPaint.top, 300, 100, memDC, 0, 0, maskBitmap, 0,0, MAKEROP4(SRCCOPY, SRCINVERT));
+#endif
+  // Cleanup
+  //SelectObject(memDC, oldBitmap);
+  DeleteObject(maskBitmap);
+  DeleteDC(memDC);
+  //// Fill the memory DC with black (transparent area for the mask)
+  //SetBkColor(memDC, RGB(0, 0, 0));
+  //
+  //// Set the text color to white and draw the text into the memory DC
+  //SetTextColor(memDC, RGB(255, 255, 255));
+  //SetBkMode(memDC, TRANSPARENT);
+  //CHAR text[] = "w32_demo";
+  //TextOutA(hdc, r.left + 4, r.top + 4, text, ARRAYSIZE(text));
+  //TextOut(memDC, 0, 0, text, textLength);
+  //SetTextColor(hdc, RGB(1, 1, 1)); // Red text
+  //SetBkMode(hdc, TRANSPARENT);
+  DeleteObject(maskBitmap);
+  //DeleteObject(oldBitmap);
+  DeleteDC(memDC);
+}
     EndPaint(hWnd, &ps);
-    //DwmFlush();
+    //return 0;
     FORWARD_WM_PAINT(hWnd, DefWindowProc);
 }
 
@@ -921,16 +939,16 @@ w32_borderless_wndproc(
     switch (msg) {
     HANDLE_MSG(hWnd, WM_SIZE,       on_size);
     HANDLE_MSG(hWnd, WM_KEYUP,      on_keyup);
-    //HANDLE_MSG(hWnd, WM_ACTIVATE,   on_activate);
+    HANDLE_MSG(hWnd, WM_ACTIVATE,   on_activate);
     HANDLE_MSG(hWnd, WM_NCHITTEST,  on_nchittest);
     HANDLE_MSG(hWnd, WM_NCCALCSIZE, on_nccalcsize);
     HANDLE_MSG(hWnd, WM_PAINT,      on_paint);
     //HANDLE_MSG(hWnd, WM_ERASEBKGND, on_erasebkgnd);
     HANDLE_MSG(hWnd, WM_DESTROY,    on_destroy);
-    //case (WM_ENTERSIZEMOVE): {
-    //  (void) SetTimer(hWnd, (UINT_PTR)0, USER_TIMER_MINIMUM, NULL);
-    //  return 0;
-    //}
+    case (WM_ENTERSIZEMOVE): {
+      (void) SetTimer(hWnd, (UINT_PTR)0, USER_TIMER_MINIMUM, NULL);
+      return 0;
+    }
     case (WM_TIMER): {
       //`static w32_window* wnd = NULL;
       //`if(!wnd){
@@ -939,15 +957,17 @@ w32_borderless_wndproc(
       //`}
       //RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE);
       //UpdateWindow(hWnd);
-      RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+      DwmFlush();
+
+      RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE);
       //RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_INVALIDATE);
       //on_paint(hWnd);
       return 0;
     }
-    //case (WM_EXITSIZEMOVE): {
-    //  (void) KillTimer(hWnd, (UINT_PTR)0);
-    //  return 0;
-    //}
+    case (WM_EXITSIZEMOVE): {
+      (void) KillTimer(hWnd, (UINT_PTR)0);
+      return 0;
+    }
     default: return DefWindowProc(hWnd, msg, wParam, lParam);
     }
 }
