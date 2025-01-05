@@ -558,64 +558,85 @@ on_paint(
 RECT r;
 if(GetClientRect(hWnd, &r))
 {
-  HDC memDC = CreateCompatibleDC(hdc);
-  HBITMAP maskBitmap = CreateCompatibleBitmap(hdc, 300, 100);
-  //HBITMAP oldBitmap = SelectObject(memDC, maskBitmap);
+
   RECT rcPaint;
   rcPaint.left = r.left;
   rcPaint.top = r.top;
   rcPaint.right = r.left + 300;
   rcPaint.bottom = r.top + 100;
+  //int width = rcPaint.right - rcPaint.left;
+  //int height = rcPaint.bottom - rcPaint.top;
   CHAR text[] = "w32_demo";
-  // Draw the text into the bitmap as a mask
-  SetBkMode(hdc, TRANSPARENT);
-  SetTextColor(hdc, RGB(0, 0, 0)); // White text
-  DrawTextA(hdc, text, -1, &rcPaint, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
-  //MaskBlt(hdc, 0, 0, 300, 100,
-  //  memDC, 0, 0, maskBitmap, 0, 0,
-  //  MAKEROP4(0x00AA0029, SRCCOPY));
+  // Dimensions for the temporary bitmap
+  const int width = 300;
+  const int height = 100;
 
+  // Create a memory buffer for the DIB
+  RGBQUAD pixels[300 * 100] = { 0 };
 
-
-#if 0
+  // Create a BITMAPINFO structure for the DIB
   BITMAPINFO bmi = { 0 };
   bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  bmi.bmiHeader.biWidth = labs(ps.rcPaint.right - ps.rcPaint.left);
-  bmi.bmiHeader.biHeight = -labs(ps.rcPaint.bottom - ps.rcPaint.top); // Negative for top-down DIB
+  bmi.bmiHeader.biWidth = width;
+  bmi.bmiHeader.biHeight = -height; // Negative height for top-down DIB
   bmi.bmiHeader.biPlanes = 1;
-  bmi.bmiHeader.biBitCount = 32;
+  bmi.bmiHeader.biBitCount = 32; // 32 bits per pixel (supports alpha)
   bmi.bmiHeader.biCompression = BI_RGB;
-  RGBQUAD bitmapBits = { 0x0, 0x0, 0x0, 0xFF };
-  
-  StretchDIBits(memDC, 0, 0, 300, 100,
-    0, 0, 1, 1, &bitmapBits, &bmi,
-    DIB_RGB_COLORS, SRCCOPY);
-  // Set up text rendering
+
+  // Create a compatible DC for text rendering
+  HDC memDC = CreateCompatibleDC(hdc);
+  HBITMAP hBitmap = CreateCompatibleBitmap(hdc, width, height);
+  HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, hBitmap);
+
+  // Fill the memory DC with black
+  SetBkColor(memDC, RGB(0, 0, 0));
+  PatBlt(memDC, 0, 0, width, height, BLACKNESS);
+
+  // Set text rendering attributes
   SetTextColor(memDC, RGB(255, 255, 255)); // White text
   SetBkMode(memDC, TRANSPARENT);
-  
 
-  // Blend the mask (text) onto the original DC
-  //BitBlt(hdc, rcPaint.left, rcPaint.top, 300, 100, memDC, 0, 0, SRCPAINT);
-  MaskBlt(hdc, rcPaint.left, rcPaint.top, 300, 100, memDC, 0, 0, maskBitmap, 0,0, MAKEROP4(SRCCOPY, SRCINVERT));
-#endif
+  // Draw the text into the memory DC
+  TextOutA(memDC, 4, 4, text, sizeof(text));
+
+  // Copy the rendered text into the DIB buffer
+  GetDIBits(memDC, hBitmap, 0, height, pixels, &bmi, DIB_RGB_COLORS);
+
+  // Apply alpha blending to the text color
+  for (int i = 0; i < width * height; i++) {
+    if (pixels[i].rgbRed == 255 && pixels[i].rgbGreen == 255 && pixels[i].rgbBlue == 255) {
+      pixels[i].rgbRed = 0;
+      pixels[i].rgbGreen = 0;
+      pixels[i].rgbBlue = 0;
+      pixels[i].rgbReserved = 255; // Transparent background
+    }
+    else {
+      //pixels[i].rgbRed =255;
+      //pixels[i].rgbGreen = 255;
+      //pixels[i].rgbBlue = 255;
+      //pixels[i].rgbReserved = 255; // Set the alpha
+      pixels[i].rgbRed = 0;
+      pixels[i].rgbGreen = 0;
+      pixels[i].rgbBlue = 0;
+      pixels[i].rgbReserved = 0; // Set the alpha
+    }
+  }
+
+  // Use StretchDIBits to draw the DIB with alpha blending
+  StretchDIBits(
+    hdc,
+    0, 0, width, height,
+    0, 0, width, height,
+    pixels,
+    &bmi,
+    DIB_RGB_COLORS,
+    SRCPAINT
+  );
+
+  
   // Cleanup
-  //SelectObject(memDC, oldBitmap);
-  DeleteObject(maskBitmap);
-  DeleteDC(memDC);
-  //// Fill the memory DC with black (transparent area for the mask)
-  //SetBkColor(memDC, RGB(0, 0, 0));
-  //
-  //// Set the text color to white and draw the text into the memory DC
-  //SetTextColor(memDC, RGB(255, 255, 255));
-  //SetBkMode(memDC, TRANSPARENT);
-  //CHAR text[] = "w32_demo";
-  //TextOutA(hdc, r.left + 4, r.top + 4, text, ARRAYSIZE(text));
-  //TextOut(memDC, 0, 0, text, textLength);
-  //SetTextColor(hdc, RGB(1, 1, 1)); // Red text
-  //SetBkMode(hdc, TRANSPARENT);
-  DeleteObject(maskBitmap);
-  //DeleteObject(oldBitmap);
+  SelectObject(memDC, oldBitmap);
+  DeleteObject(hBitmap);
   DeleteDC(memDC);
 }
     EndPaint(hWnd, &ps);
