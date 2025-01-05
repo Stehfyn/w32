@@ -13,7 +13,7 @@ if not defined VSINSTALLPATH (
 
 set out=out
 set sources=..\..\demo.c ..\..\w32.c
-set cflags=/nologo /O2 /Oi /MT /std:c11 /Wall /WX /wd4710 /wd4191 /D _NDEBUG /D UNICODE /D _UNICODE
+set cflags=/nologo /O2 /Oi /MT /std:c11 /Wall /WX /wd4710 /wd4191 /wd5045 /D _NDEBUG /D UNICODE /D _UNICODE
 set libs=ntdll.lib gdi32.lib dwmapi.lib Shcore.lib Kernel32.lib libcmt.lib user32.lib comctl32.lib  Shlwapi.lib shell32.lib runtimeobject.lib ole32.lib advapi32.lib glu32.lib opengl32.lib msimg32.lib
 set lflags=/CGTHREADS:8
 

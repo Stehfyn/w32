@@ -12,6 +12,7 @@
 #include "w32.h"
 #include <intrin.h>
 #include <windowsx.h>
+#include <time.h>
 #pragma warning(disable : 4255 4820)
 #include <dwmapi.h>
 #include <shellscalingapi.h>
@@ -153,6 +154,7 @@ wndproc(
       SetLastError(NO_ERROR);
       offset = SetWindowLongPtr(hWnd, GWLP_USERDATA, (LONG_PTR) user_data);
       ASSERT_W32((0 == offset) && (NO_ERROR == GetLastError()));
+      
     }
     else
     {
@@ -344,11 +346,11 @@ on_activate(
 
     if (!fMinimized)
     {
-      static
-      //const MARGINS m = {0,0,1,0};
-      const MARGINS m = {1,1,1,1};
-      //const MARGINS m = {0,0,0,0};
-      (VOID) DwmExtendFrameIntoClientArea(hWnd, &m);
+      //static
+      ////const MARGINS m = {0,0,1,0};
+      //const MARGINS m = {1,1,1,1};
+      ////const MARGINS m = {0,0,0,0};
+      //(VOID) DwmExtendFrameIntoClientArea(hWnd, &m);
       // Inform the application of the frame change.
       (VOID) SetWindowPos(
         hWnd,
@@ -359,20 +361,20 @@ on_activate(
         0,
         SWP_FRAMECHANGED | SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW
       ); 
-      INT backdropType = DWMSBT_TRANSIENTWINDOW;
-      DwmSetWindowAttribute(
-        hWnd,
-        DWMWA_SYSTEMBACKDROP_TYPE,
-        &backdropType,
-        sizeof(INT)
-      );
-      DWM_WINDOW_CORNER_PREFERENCE cornerPreference = 1;
-      DwmSetWindowAttribute(
-        hWnd,
-        DWMWA_WINDOW_CORNER_PREFERENCE,
-        &cornerPreference,
-        sizeof(cornerPreference)
-      );
+      //INT backdropType = DWMSBT_TRANSIENTWINDOW;
+      //DwmSetWindowAttribute(
+      //  hWnd,
+      //  DWMWA_SYSTEMBACKDROP_TYPE,
+      //  &backdropType,
+      //  sizeof(INT)
+      //);
+      //DWM_WINDOW_CORNER_PREFERENCE cornerPreference = 1;
+      //DwmSetWindowAttribute(
+      //  hWnd,
+      //  DWMWA_WINDOW_CORNER_PREFERENCE,
+      //  &cornerPreference,
+      //  sizeof(cornerPreference)
+      //);
     }
 }
 
@@ -457,38 +459,358 @@ on_erasebkgnd(
 
     return 1U;
 }
-void __forceinline ApplyBlur(BYTE* pixels, int width, int height, int stride, int radius) {
-  int r, g, b;
-  int kernelSize = radius * 2 + 1;
-  int kernelArea = kernelSize * kernelSize;
+void __forceinline ApplyGaussianSmoothing(BYTE* p, int w, int h, int s, float sigma) {
+  int kernelRadius = (int)ceil(3 * sigma); // 3-sigma rule for the kernel size
+  int kernelSize = 2 * kernelRadius + 1;
 
-  BYTE* temp = (BYTE*)malloc(stride * height);
-  memcpy(temp, pixels, stride * height);
+  // Generate the 1D Gaussian kernel
+  float* kernel = (float*)malloc(kernelSize * sizeof(float));
+  float sum = 0.0f;
+  for (int i = -kernelRadius; i <= kernelRadius; ++i) {
+    kernel[i + kernelRadius] = expf(-0.5f * (i * i) / (sigma * sigma));
+    sum += kernel[i + kernelRadius];
+  }
+  // Normalize the kernel
+  for (int i = 0; i < kernelSize; ++i) {
+    kernel[i] /= sum;
+  }
 
-  for (int y = radius; y < height - radius; ++y) {
-    for (int x = radius; x < width - radius; ++x) {
-      r = g = b = 0;
+  // Allocate a temporary buffer
+  BYTE* temp = (BYTE*)malloc(s * h);
 
-      // Apply box blur kernel
-      for (int ky = -radius; ky <= radius; ++ky) {
-        for (int kx = -radius; kx <= radius; ++kx) {
-          int pixelIndex = ((y + ky) * stride) + ((x + kx) * 4);
-          b += temp[pixelIndex];
-          g += temp[pixelIndex + 1];
-          r += temp[pixelIndex + 2];
+  // Horizontal pass
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      float r = 0, g = 0, b = 0, a = 0;
+
+      for (int k = -kernelRadius; k <= kernelRadius; ++k) {
+        int nx = x + k;
+        if (nx >= 0 && nx < w) {
+          int index = (y * w + nx) * 4;
+          float weight = kernel[k + kernelRadius];
+          b += weight * p[index];
+          g += weight * p[index + 1];
+          r += weight * p[index + 2];
+          a += weight * p[index + 3];
         }
       }
 
-      int outputIndex = (y * stride) + (x * 4);
-      pixels[outputIndex] = (BYTE)(b / kernelArea);
-      pixels[outputIndex + 1] = (BYTE)(g / kernelArea);
-      pixels[outputIndex + 2] = (BYTE)(r / kernelArea);
+      int index = (y * w + x) * 4;
+      temp[index] = (BYTE)fminf(fmaxf(b, 0), 255);
+      temp[index + 1] = (BYTE)fminf(fmaxf(g, 0), 255);
+      temp[index + 2] = (BYTE)fminf(fmaxf(r, 0), 255);
+      temp[index + 3] = (BYTE)fminf(fmaxf(a, 0), 255);
+    }
+  }
+
+  // Vertical pass
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      float r = 0, g = 0, b = 0, a = 0;
+
+      for (int k = -kernelRadius; k <= kernelRadius; ++k) {
+        int ny = y + k;
+        if (ny >= 0 && ny < h) {
+          int index = (ny * w + x) * 4;
+          float weight = kernel[k + kernelRadius];
+          b += weight * temp[index];
+          g += weight * temp[index + 1];
+          r += weight * temp[index + 2];
+          a += weight * temp[index + 3];
+        }
+      }
+
+      int index = (y * w + x) * 4;
+      p[index] = (BYTE)fminf(fmaxf(b, 0), 255);
+      p[index + 1] = (BYTE)fminf(fmaxf(g, 0), 255);
+      p[index + 2] = (BYTE)fminf(fmaxf(r, 0), 255);
+      //p[index + 3] = (BYTE)fminf(fmaxf(a, 0), 255);
+      p[index + 3] = 255;
+    }
+  }
+
+  // Free resources
+  free(kernel);
+  free(temp);
+}
+void __forceinline ApplyBlurWithGrayscaleNoise(BYTE* p, int w, int h, int s, int rr, int noiseLevel) {
+  BYTE* temp = (BYTE*)malloc(s * h);
+  memcpy(temp, p, s * h);
+
+  // Seed the random number generator
+  srand((unsigned int)time(NULL));
+
+  // Horizontal blur with grayscale noise
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int r = 0, g = 0, b = 0, count = 0;
+
+      for (int kx = -rr; kx <= rr; ++kx) {
+        int nx = x + kx;
+        if (nx >= 0 && nx < w) {
+          int index = (y * w + nx) * 4;
+          b += p[index];
+          g += p[index + 1];
+          r += p[index + 2];
+          count++;
+        }
+      }
+
+      int index = (y * w + x) * 4;
+
+      // Generate grayscale noise (same value for R, G, B)
+      int noise = (rand() % (2 * noiseLevel + 1)) - noiseLevel;
+
+      // Apply the noise equally to all channels
+      BYTE grayNoise =  (BYTE)noise;
+      temp[index]     = (BYTE)(b / count) + (BYTE)noise;
+      temp[index + 1] = (BYTE)(g / count) + (BYTE)noise;
+      temp[index + 2] = (BYTE)(r / count) + (BYTE)noise;
+      temp[index + 3] = grayNoise; // Preserve alpha
+    }
+  }
+
+  // Vertical blur with grayscale noise
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int r = 0, g = 0, b = 0, count = 0;
+
+      for (int ky = -rr; ky <= rr; ++ky) {
+        int ny = y + ky;
+        if (ny >= 0 && ny < h) {
+          int index = (ny * w + x) * 4;
+          b += temp[index];
+          g += temp[index + 1];
+          r += temp[index + 2];
+          count++;
+        }
+      }
+
+      int index = (y * w + x) * 4;
+
+      // Generate grayscale noise (same value for R, G, B)
+      //int noise = (rand() % (2 * noiseLevel + 1)) - noiseLevel;
+
+      // Apply the noise equally to all channels
+      //BYTE grayNoise = (BYTE)noise;
+      //BYTE alpha = (temp[index + 3] ^ grayNoise);
+      temp[index]     = (BYTE)(b / count);
+      temp[index + 1] = (BYTE)(g / count);
+      temp[index + 2] = (BYTE)(r / count);
+      p[index + 3] = 255; 
     }
   }
 
   free(temp);
 }
 
+void __forceinline ApplyBlurWithNoise(BYTE* p, int w, int h, int s, int rr, int noiseLevel) {
+  BYTE* temp = (BYTE*)malloc(s * h);
+  memcpy(temp, p, s * h);
+
+  // Seed the random number generator
+  srand((unsigned int)time(NULL));
+
+  // Horizontal blur with noise
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int r = 0, g = 0, b = 0, count = 0;
+
+      for (int kx = -rr; kx <= rr; ++kx) {
+        int nx = x + kx;
+        if (nx >= 0 && nx < w) {
+          int index = (y * w + nx) * 4;
+          b += p[index];
+          g += p[index + 1];
+          r += p[index + 2];
+          count++;
+        }
+      }
+
+      int index = (y * w + x) * 4;
+
+      // Add random noise to the blurred result
+      int noiseB = (rand() % (2 * noiseLevel + 1)) - noiseLevel;
+      int noiseG = (rand() % (2 * noiseLevel + 1)) - noiseLevel;
+      int noiseR = (rand() % (2 * noiseLevel + 1)) - noiseLevel;
+
+      temp[index] = (BYTE)(b / count + noiseB);
+      temp[index + 1] = (BYTE)(g / count + noiseG);
+      temp[index + 2] = (BYTE)(r / count + noiseR);
+      temp[index + 3] = (BYTE)(p[index + 3]); // Preserve alpha
+    }
+  }
+
+  // Vertical blur with noise
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int r = 0, g = 0, b = 0, count = 0;
+
+      for (int ky = -rr; ky <= rr; ++ky) {
+        int ny = y + ky;
+        if (ny >= 0 && ny < h) {
+          int index = (ny * w + x) * 4;
+          b += temp[index];
+          g += temp[index + 1];
+          r += temp[index + 2];
+          count++;
+        }
+      }
+
+      int index = (y * w + x) * 4;
+
+      // Add random noise to the blurred result
+      int noiseB = (rand() % (2 * noiseLevel + 1)) - noiseLevel;
+      int noiseG = (rand() % (2 * noiseLevel + 1)) - noiseLevel;
+      int noiseR = (rand() % (2 * noiseLevel + 1)) - noiseLevel;
+
+      p[index] = (BYTE)(b / count + noiseB);
+      p[index + 1] = (BYTE)(g / count + noiseG);
+      p[index + 2] = (BYTE)(r / count + noiseR);
+      p[index + 3] = (BYTE)(temp[index + 3]); // Preserve alpha
+    }
+  }
+
+  free(temp);
+}
+void __forceinline ApplyBlur(BYTE* p, int w, int h, int s, int rr) {
+
+  BYTE* temp = (BYTE*)malloc(s * h);
+  memcpy(temp, p, s * h);
+  // Horizontal blur
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int r = 0, g = 0, b = 0, count = 0;
+
+      for (int kx = -rr; kx <= rr; ++kx) {
+        int nx = x + kx;
+        if (nx >= 0 && nx < w) {
+          int index = (y * w + nx) * 4;
+          b += p[index];
+          g += p[index + 1];
+          r += p[index + 2];
+          count++;
+        }
+      }
+
+      int index = (y * w + x) * 4;
+      temp[index] = (BYTE)(b / count);
+      temp[index + 1] = (BYTE)(g / count);
+      temp[index + 2] = (BYTE)(r / count);
+      temp[index + 3] = (BYTE)(p[index + 3]); // Preserve alpha
+    }
+  }
+
+  // Vertical blur
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int r = 0, g = 0, b = 0, count = 0;
+
+      for (int ky = -rr; ky <= rr; ++ky) {
+        int ny = y + ky;
+        if (ny >= 0 && ny < h) {
+          int index = (ny * w + x) * 4;
+          b += temp[index];
+          g += temp[index + 1];
+          r += temp[index + 2];
+          count++;
+        }
+      }
+
+      int index = (y * w + x) * 4;
+      p[index] = (BYTE)(b / count);
+      p[index + 1] = (BYTE)(g / count);
+      p[index + 2] = (BYTE)(r / count);
+      p[index + 3] = (BYTE)(temp[index + 3]); // Preserve alpha
+    }
+  }
+
+  free(temp);
+}
+
+void __forceinline ApplyTint(BYTE* p, int w, int h,BYTE tintR, BYTE tintG, BYTE tintB, float tintStrength) {
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      int index = (y * w + x) * 4;
+
+      p[index] =     (BYTE)(p[index] *     (1.0f - tintStrength) + tintB * tintStrength);
+      p[index + 1] = (BYTE)(p[index + 1] * (1.0f - tintStrength) + tintG * tintStrength);
+      p[index + 2] = (BYTE)(p[index + 2] * (1.0f - tintStrength) + tintR * tintStrength);
+      // Alpha remains unchanged
+    }
+  }
+}
+void __forceinline
+capture_screen(HWND hWnd, HDC hdc, DWORD dwmColor)
+{
+  HBITMAP hBitmapBg = NULL;
+  HWND hDesktopWnd = GetDesktopWindow();
+  HDC  hDesktopDC = GetDC(hDesktopWnd);
+  HDC  hCaptureDC = CreateCompatibleDC(hDesktopDC);
+  RECT r;
+  GetWindowRect(hWnd, &r);
+  int w = labs(r.right - r.left);
+  int h = labs(r.bottom - r.top);
+  hBitmapBg = CreateCompatibleBitmap(
+    hDesktopDC,
+    labs(r.right - r.left),
+    labs(r.bottom - r.top)
+  );
+  if (hBitmapBg)
+  {
+
+    BITMAPINFO bmi = { 0 };
+    BITMAPINFOHEADER bi = { 0 };
+    bi.biSize = sizeof(BITMAPINFOHEADER);
+    bi.biWidth = w;
+    bi.biHeight = -h; // Negative to flip vertically for OpenGL
+    bi.biPlanes = 1;
+    bi.biBitCount = 32; // RGBA
+    bi.biCompression = BI_RGB;
+    bmi.bmiHeader = bi;
+    SelectObject(hCaptureDC, hBitmapBg);
+    BitBlt(
+      hCaptureDC,
+      0,
+      0,
+      w,
+      h,
+      hDesktopDC,
+      r.left,
+      r.top,
+      SRCCOPY | CAPTUREBLT
+    );
+
+    BYTE* pixels = malloc(4*w*h);
+    GetDIBits(hCaptureDC, hBitmapBg, 0, h, pixels, &bmi, DIB_RGB_COLORS);
+    ApplyGaussianSmoothing(pixels, w, h, 4 * w, 42.5f);
+    FillRect(hCaptureDC, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
+    BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, 0 };
+    BLENDFUNCTION blend2 = { AC_SRC_OVER, 0, 255, 0};
+    AlphaBlend(hCaptureDC, 0, 0, r.right, r.bottom, hCaptureDC, 0, 0, r.right, r.bottom, blend);
+    ApplyTint(pixels, w, h, GetRValue(dwmColor), GetGValue(dwmColor), GetBValue(dwmColor),0.3f);
+    FillRect(hCaptureDC, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
+    AlphaBlend(hCaptureDC, 0, 0, r.right, r.bottom, hCaptureDC, 0, 0, r.right, r.bottom, blend2);
+    ApplyBlurWithGrayscaleNoise(pixels, w, h, 4*w, 70, 5);
+    SetDIBits(hCaptureDC, hBitmapBg, 0, h, pixels, &bmi, DIB_RGB_COLORS);
+    free(pixels);
+    SelectObject(hdc, hBitmapBg);
+    BitBlt(
+      hdc,
+      0,
+      0,
+      w,
+      h,
+      hCaptureDC,
+      0,
+      0,
+      SRCCOPY
+    );
+  }
+  ReleaseDC(hDesktopWnd, hDesktopDC);
+  DeleteDC(hCaptureDC);
+  DeleteObject(hBitmapBg);
+}
 void __forceinline DeflateRectByPixels(RECT* rect, int nPixels) {
   rect->left   += nPixels;
   rect->top    += nPixels;
@@ -499,61 +821,65 @@ VOID CFORCEINLINE
 on_paint(
     HWND hWnd)
 {
+  SetWindowDisplayAffinity(hWnd, WDA_EXCLUDEFROMCAPTURE);
+
     PAINTSTRUCT ps;
     HDC hdc = BeginPaint(hWnd, &ps);
     DWORD dwmColor = 0;
     BOOL isOpaque = FALSE;
-
-    //capture_screen(hWnd, hdc);
-
     if (SUCCEEDED(DwmGetColorizationColor(&dwmColor, &isOpaque))) {
       COLORREF color = BGR(dwmColor);
 
+    capture_screen(hWnd, hdc, color);
       HDC memDC = CreateCompatibleDC(hdc);
       HBITMAP memBitmap = CreateCompatibleBitmap(hdc, ps.rcPaint.right, ps.rcPaint.bottom);
       HGDIOBJ oldBitmap = SelectObject(memDC, memBitmap);
-      BITMAPINFO bmi = { 0 };
-      bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-      bmi.bmiHeader.biWidth = labs(ps.rcPaint.right - ps.rcPaint.left);
-      bmi.bmiHeader.biHeight = -labs(ps.rcPaint.bottom - ps.rcPaint.top); // Negative for top-down DIB
-      bmi.bmiHeader.biPlanes = 1;
-      bmi.bmiHeader.biBitCount = 32;
-      bmi.bmiHeader.biCompression = BI_RGB;
-      RGBQUAD bitmapBits = { 0x01, 0x01, 0x01, 0xFF };
-
-      StretchDIBits(memDC, 0, 0, labs(ps.rcPaint.right - ps.rcPaint.left), labs(ps.rcPaint.bottom - ps.rcPaint.top),
-        0, 0, 1, 1, &bitmapBits, &bmi,
-        DIB_RGB_COLORS, SRCPAINT);
-      //SelectObject(hCaptureDC, hBitmapBg);
-      BitBlt(
-        hdc,
-        0,
-        0,
-        labs(ps.rcPaint.right - ps.rcPaint.left),
-        labs(ps.rcPaint.bottom - ps.rcPaint.top),
-        memDC,
-        0,
-        0,
-        SRCCOPY
-      );
+      //BITMAPINFO bmi = { 0 };
+      //bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+      //bmi.bmiHeader.biWidth = labs(ps.rcPaint.right - ps.rcPaint.left);
+      //bmi.bmiHeader.biHeight = -labs(ps.rcPaint.bottom - ps.rcPaint.top); // Negative for top-down DIB
+      //bmi.bmiHeader.biPlanes = 1;
+      //bmi.bmiHeader.biBitCount = 32;
+      //bmi.bmiHeader.biCompression = BI_RGB;
+      //RGBQUAD bitmapBits = { 0x00, 0, 0, 0xFF };
+      //
+      //StretchDIBits(memDC, 0, 0, labs(ps.rcPaint.right - ps.rcPaint.left), labs(ps.rcPaint.bottom - ps.rcPaint.top),
+      //  0, 0, 1, 1, &bitmapBits, &bmi,
+      //  DIB_RGB_COLORS, SRCPAINT);
+      //
+      ////SelectObject(hCaptureDC, hBitmapBg);
+      //BitBlt(
+      //  hdc,
+      //  0,
+      //  0,
+      //  labs(ps.rcPaint.right - ps.rcPaint.left),
+      //  labs(ps.rcPaint.bottom - ps.rcPaint.top),
+      //  memDC,
+      //  0,
+      //  0,
+      //  SRCCOPY
+      //);
       //StretchDIBits(hdc, 0, 0, labs(ps.rcPaint.right - ps.rcPaint.left), labs(ps.rcPaint.bottom - ps.rcPaint.top),
       //  0, 0, 1, 1, &bitmapBits, &bmi,
       //  DIB_RGB_COLORS, SRCPAINT);
       // Fill the memory DC with the DWM color
-      HBRUSH brush = CreateSolidBrush(color);
-      FillRect(memDC, &ps.rcPaint, brush);
-      DeleteObject(brush);
-
-      // Blend the memory DC with the main DC using AlphaBlend
-      BLENDFUNCTION blend = { AC_SRC_OVER, 0, 128, 0 };
-      AlphaBlend(hdc, 0, 0, ps.rcPaint.right, ps.rcPaint.bottom,
-        memDC, 0, 0, ps.rcPaint.right, ps.rcPaint.bottom, blend);
-
+      //HBRUSH brush = CreateSolidBrush(color);
+      //FillRect(memDC, &ps.rcPaint, brush);
+      //FillRect(memDC, &ps.rcPaint, (HBRUSH)GetStockObject(WHITE_BRUSH));
+      ////DeleteObject(brush);
+      //// Blend the memory DC with the main DC using AlphaBlend
+      //BLENDFUNCTION blend = { AC_SRC_OVER, 0, 16, 0};
+      //AlphaBlend(hdc, 0, 0, ps.rcPaint.right, ps.rcPaint.bottom,
+      //  memDC, 0, 0, ps.rcPaint.right, ps.rcPaint.bottom, blend);
+      
       // Cleanup
       SelectObject(memDC, oldBitmap);
       DeleteObject(memBitmap);
       DeleteObject(oldBitmap);
       DeleteDC(memDC);
+      SetWindowDisplayAffinity(hWnd, WDA_NONE);
+      GdiFlush();
+
     }
 RECT r;
 if(GetClientRect(hWnd, &r))
@@ -603,24 +929,24 @@ if(GetClientRect(hWnd, &r))
   GetDIBits(memDC, hBitmap, 0, height, pixels, &bmi, DIB_RGB_COLORS);
 
   // Apply alpha blending to the text color
-  for (int i = 0; i < width * height; i++) {
-    if (pixels[i].rgbRed == 255 && pixels[i].rgbGreen == 255 && pixels[i].rgbBlue == 255) {
-      pixels[i].rgbRed = 0;
-      pixels[i].rgbGreen = 0;
-      pixels[i].rgbBlue = 0;
-      pixels[i].rgbReserved = 255; // Transparent background
-    }
-    else {
-      //pixels[i].rgbRed =255;
-      //pixels[i].rgbGreen = 255;
-      //pixels[i].rgbBlue = 255;
-      //pixels[i].rgbReserved = 255; // Set the alpha
-      pixels[i].rgbRed = 0;
-      pixels[i].rgbGreen = 0;
-      pixels[i].rgbBlue = 0;
-      pixels[i].rgbReserved = 0; // Set the alpha
-    }
-  }
+  //for (int i = 0; i < width * height; i++) {
+  //  if (pixels[i].rgbRed == 255 && pixels[i].rgbGreen == 255 && pixels[i].rgbBlue == 255) {
+  //    pixels[i].rgbRed = 0;
+  //    pixels[i].rgbGreen = 0;
+  //    pixels[i].rgbBlue = 0;
+  //    pixels[i].rgbReserved = 255; // Transparent background
+  //  }
+  //  else {
+  //    //pixels[i].rgbRed =255;
+  //    //pixels[i].rgbGreen = 255;
+  //    //pixels[i].rgbBlue = 255;
+  //    //pixels[i].rgbReserved = 255; // Set the alpha
+  //    pixels[i].rgbRed = 0;
+  //    pixels[i].rgbGreen = 0;
+  //    pixels[i].rgbBlue = 0;
+  //    pixels[i].rgbReserved = 0; // Set the alpha
+  //  }
+  //}
 
   // Use StretchDIBits to draw the DIB with alpha blending
   StretchDIBits(
@@ -631,9 +957,19 @@ if(GetClientRect(hWnd, &r))
     &bmi,
     DIB_RGB_COLORS,
     SRCPAINT
+    //SRCCOPY
   );
-
-  
+  StretchDIBits(
+    hdc,
+    0, 0, width, height,
+    0, 0, width, height,
+    pixels,
+    &bmi,
+    DIB_RGB_COLORS,
+    SRCINVERT
+    //SRCCOPY
+  );
+  //SRCINVERT
   // Cleanup
   SelectObject(memDC, oldBitmap);
   DeleteObject(hBitmap);
@@ -966,29 +1302,22 @@ w32_borderless_wndproc(
     HANDLE_MSG(hWnd, WM_PAINT,      on_paint);
     //HANDLE_MSG(hWnd, WM_ERASEBKGND, on_erasebkgnd);
     HANDLE_MSG(hWnd, WM_DESTROY,    on_destroy);
-    case (WM_ENTERSIZEMOVE): {
-      (void) SetTimer(hWnd, (UINT_PTR)0, USER_TIMER_MINIMUM, NULL);
-      return 0;
+    //case (WM_ENTERSIZEMOVE): {
+    //  (void) SetTimer(hWnd, (UINT_PTR)0, USER_TIMER_MINIMUM, NULL);
+    //  return 0;
+    //}
+    case (WM_CREATE): {
+      (void)SetTimer(hWnd, (UINT_PTR)0, 15*USER_TIMER_MINIMUM, NULL);
     }
     case (WM_TIMER): {
-      //`static w32_window* wnd = NULL;
-      //`if(!wnd){
-      //`
-      //`  wnd = (w32_window*) GetWindowLongPtr(hWnd, GWLP_USERDATA);
-      //`}
-      //RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE);
-      //UpdateWindow(hWnd);
       DwmFlush();
-
       RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE);
-      //RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_INVALIDATE);
-      //on_paint(hWnd);
       return 0;
     }
-    case (WM_EXITSIZEMOVE): {
-      (void) KillTimer(hWnd, (UINT_PTR)0);
-      return 0;
-    }
+    //case (WM_EXITSIZEMOVE): {
+    //  (void) KillTimer(hWnd, (UINT_PTR)0);
+    //  return 0;
+    //}
     default: return DefWindowProc(hWnd, msg, wParam, lParam);
     }
 }

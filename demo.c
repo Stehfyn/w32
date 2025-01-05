@@ -33,14 +33,14 @@ WinMain(
     w32_create_window_class(
       _T("w32_demo_class"),
       _T("res\\checkerboard.ico"),
-      CS_VREDRAW | CS_HREDRAW | CS_OWNDC
+      CS_VREDRAW | CS_HREDRAW | CS_OWNDC//;// | CS_DROPSHADOW
     ),
     start.x,
     start.y,
     sz.cx,
     sz.cy,
     WS_EX_APPWINDOW,
-    WS_POPUP | WS_SYSMENU | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
+    WS_POPUP | WS_SYSMENU | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
     w32_borderless_wndproc,
     NULL,
     NULL
