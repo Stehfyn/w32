@@ -18,12 +18,6 @@
 #include <winternl.h>
 #pragma warning(default : 4255 4820)
 
-
-#include <GL\GL.h>
-//#include <GL\GLU.h>
-//#include <GL\glext.h>
-#include <GL\wglext.h>
-#define RETURN_FALSE_IF_NULL(p) if (!p) return FALSE;
 /*=============================================================================
 ** 3. DECLARATIONS
 **===========================================================================*/
@@ -32,7 +26,6 @@
 **===========================================================================*/
 #define STATUS_SUCCESS (0x00000000)
 #define ASSERT_W32(cond) do { if (!(cond)) __debugbreak(); } while (0)
-#define GL_BGRA        (0x80E1)
 /*=============================================================================
 ** 3.2 Types
 **===========================================================================*/
@@ -44,8 +37,7 @@
 /*=============================================================================
 ** 3.4 Static global variables
 **===========================================================================*/
-static HDC     g_hDC;
-static HGLRC   g_hRC;
+
 static INT     g_nWidth  = 0;
 static INT     g_nHeight = 0;
 
@@ -488,10 +480,9 @@ w32_create_window_class(
       wcex.lpszClassName = lpszClassName;
       wcex.style         = style;
       wcex.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
-      //wcex.hbrBackground = (HBRUSH) GetStockObject(WHITE_BRUSH);
-      wcex.hCursor     = LoadCursor(NULL, IDC_ARROW);
-      wcex.lpfnWndProc = (WNDPROC) wndproc;
-      wcex.hIcon       = (HICON) LoadImage(
+      wcex.hCursor       = LoadCursor(NULL, IDC_ARROW);
+      wcex.lpfnWndProc   = (WNDPROC) wndproc;
+      wcex.hIcon         = (HICON) LoadImage(
         GetModuleHandle(NULL),
         lpszIconFileName,
         IMAGE_ICON,
@@ -543,8 +534,8 @@ w32_create_window(
 }
 
 BOOL FORCEINLINE
-w32_pump_message_loop(
-    HWND        hwndPump)
+PumpMessageQueue(
+    HWND hwndPump)
 {
     MSG  msg;
     BOOL quit = FALSE;
@@ -558,15 +549,15 @@ w32_pump_message_loop(
     return !quit;
 }
 
-FORCEINLINE VOID
-w32_run_message_loop(
-    HWND        hwndPump)
+VOID FORCEINLINE
+RunMessageQueue(
+    HWND hwndRun)
 {
     MSG  msg;
     RtlSecureZeroMemory(&msg, sizeof(MSG));
 
     for (;;) {
-      BOOL received = GetMessage(&msg, hwndPump, 0, 0) != 0;
+      BOOL received = GetMessage(&msg, hwndRun, 0, 0) != 0;
       if (received != -1) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
@@ -577,7 +568,7 @@ w32_run_message_loop(
 }
 
 BOOL FORCEINLINE
-w32_get_display_info(
+GetDisplayInfo(
     w32_display_info* displayInfo)
 {
     return EnumDisplayMonitors(
@@ -589,14 +580,14 @@ w32_get_display_info(
 }
 
 BOOL FORCEINLINE
-w32_set_process_dpiaware(
+RequestSystemDpiAutonomy(
     VOID)
 {
     return S_OK == SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
 }
 
 BOOL FORCEINLINE
-w32_set_alpha_composition(
+SetAlphaComposition(
     w32_window* wnd,
     BOOL        enabled)
 {
@@ -619,7 +610,7 @@ w32_set_alpha_composition(
 }
 
 LONG FORCEINLINE
-w32_set_timer_resolution(
+SetSystemTimerResolution(
     ULONG  hnsDesiredResolution,
     BOOL   setResolution,
     PULONG hnsCurrentResolution)
@@ -633,7 +624,7 @@ w32_set_timer_resolution(
 }
 
 HANDLE FORCEINLINE
-w32_create_high_resolution_timer(
+CreateHighResolutionTimer(
     LPSECURITY_ATTRIBUTES lpTimerAttributes,
     LPCTSTR               lpszTimerName,
     DWORD                 dwDesiredAccess)
@@ -647,7 +638,7 @@ w32_create_high_resolution_timer(
 }
 
 BOOL FORCEINLINE
-w32_yield_on_high_resolution_timer(
+YieldOnTimer(
     HANDLE               hTimer,
     const PLARGE_INTEGER dueTime)
 {
@@ -657,24 +648,24 @@ w32_yield_on_high_resolution_timer(
 }
 
 BOOL FORCEINLINE
-w32_hectonano_sleep(
+HectonanoSleep(
     LONGLONG hns)
 {
     BOOL          result   = FALSE;
     LARGE_INTEGER due_time = {0};
-    HANDLE        timer    = w32_create_high_resolution_timer(0, 0, TIMER_MODIFY_STATE);
+    HANDLE        timer    = CreateHighResolutionTimer(0, 0, TIMER_MODIFY_STATE);
     if (!timer)
     {
       return FALSE;
     }
     due_time.QuadPart = hns;
-    result            = w32_yield_on_high_resolution_timer(timer, &due_time);
+    result            = YieldOnTimer(timer, &due_time);
     (VOID) CloseHandle(timer);
     return result;
 }
 
 BOOL FORCEINLINE
-w32_adjust_window_start_point(
+AdjustWindowPoint(
     LPPOINT point)
 {
     MONITORINFO mi = {sizeof(MONITORINFO)};
@@ -750,7 +741,7 @@ w32_timer_reset(
 }
 
 EXTERN_C LRESULT
-w32_borderless_wndproc(
+WndProc(
     HWND        hWnd,
     UINT        msg,
     WPARAM      wParam,
@@ -798,7 +789,7 @@ w32_borderless_wndproc(
 }
 
 EXTERN_C BOOL CFORCEINLINE
-w32_get_centered_window_point(
+GetWindowCenteredPoint(
     LPPOINT      p,
     CONST LPSIZE sz)
 {
@@ -813,165 +804,4 @@ w32_get_centered_window_point(
       return TRUE;
     }
     return FALSE;
-}
-
-PFNWGLCHOOSEPIXELFORMATARBPROC    wglChoosePixelFormatARB    = NULL;
-PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB = NULL;
-PFNWGLSWAPINTERVALEXTPROC         wglSwapIntervalEXT         = NULL;
-PFNWGLGETSWAPINTERVALEXTPROC      wglGetSwapIntervalEXT      = NULL;
-HMODULE                           wgl;
-typedef PROC (__stdcall* _glw32_get_proc_addr)(LPCSTR);
-static _glw32_get_proc_addr wgl_get_proc_address;
-typedef VOID (* LPFNVOID)(
-  VOID
-);
-
-PROC CFORCEINLINE
-wgl_load_proc(
-    LPCSTR proc)
-{
-    PROC res = NULL;
-    res = wgl_get_proc_address(proc);
-    if(!res)
-    {
-      res = (PROC) GetProcAddress(wgl, proc);
-    }
-    return res;
-}
-
-static BOOL
-w32_wgl_init(
-    VOID)
-{
-    wgl = LoadLibrary(_T("opengl32.dll"));
-    ASSERT_W32(wgl);
-    wgl_get_proc_address =(_glw32_get_proc_addr) (LPVOID) GetProcAddress(wgl, "wglGetProcAddress");
-    ASSERT_W32(wgl_get_proc_address);
-    wglChoosePixelFormatARB =
-      (PFNWGLCHOOSEPIXELFORMATARBPROC) (LPVOID) wgl_load_proc("wglChoosePixelFormatARB");
-    ASSERT_W32(wglChoosePixelFormatARB);
-    wglCreateContextAttribsARB =
-      (PFNWGLCREATECONTEXTATTRIBSARBPROC) (LPVOID) wgl_load_proc("wglCreateContextAttribsARB");
-    ASSERT_W32(wglCreateContextAttribsARB);
-    wglSwapIntervalEXT = (PFNWGLSWAPINTERVALEXTPROC) (LPVOID) wgl_load_proc("wglSwapIntervalEXT");
-    ASSERT_W32(wglSwapIntervalEXT);
-    wglGetSwapIntervalEXT =
-      (PFNWGLGETSWAPINTERVALEXTPROC) (LPVOID) wgl_load_proc("wglGetSwapIntervalEXT");
-    ASSERT_W32(wglGetSwapIntervalEXT);
-
-    return TRUE;
-}
-
-INT
-w32_wgl_get_pixel_format(
-    UINT msaa)
-{
-    HWND     hWnd;
-    HDC      hDC;
-    HGLRC    hRC;
-    WNDCLASS wc;
-    INT      pfMSAA;
-
-    PIXELFORMATDESCRIPTOR pfd;
-    SecureZeroMemory(&wc, sizeof(WNDCLASS));
-    wc.hInstance     = GetModuleHandle(NULL);
-    wc.lpfnWndProc   = DefWindowProc;
-    wc.lpszClassName = _T("GLEW");
-    if (0 == RegisterClass(&wc)) return GL_TRUE;
-    hWnd = CreateWindow(
-      _T("GLEW"),
-      _T("GLEW"),
-      WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-      CW_USEDEFAULT,
-      CW_USEDEFAULT,
-      CW_USEDEFAULT,
-      CW_USEDEFAULT,
-      NULL,
-      NULL,
-      GetModuleHandle(NULL),
-      NULL
-    );
-    if (NULL == hWnd) return GL_TRUE;
-    hDC = GetDC(hWnd);
-    if (NULL == hDC) return GL_TRUE;
-    ZeroMemory(&pfd, sizeof(PIXELFORMATDESCRIPTOR));
-    pfd.nSize    = sizeof(PIXELFORMATDESCRIPTOR);
-    pfd.nVersion = 1;
-    pfd.dwFlags  = PFD_DRAW_TO_WINDOW |     
-                   PFD_SUPPORT_OPENGL |      
-                   PFD_SUPPORT_COMPOSITION | 
-                   PFD_GENERIC_ACCELERATED |
-                   PFD_SWAP_EXCHANGE |
-                   PFD_DOUBLEBUFFER;
-    pfd.cAlphaBits = 8;
-    pfd.cDepthBits = 24;
-    pfd.cColorBits = 32;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    pfMSAA         = ChoosePixelFormat(hDC, &pfd);
-    if (pfMSAA == 0) return GL_TRUE;
-    if(0 == SetPixelFormat(hDC, pfMSAA, &pfd)) return GL_TRUE;
-    hRC = wglCreateContext(hDC);
-    wglMakeCurrent(hDC, hRC);
-
-    w32_wgl_init();
-
-    while (msaa > 0)
-    {
-      UINT num_formats = 0;
-      int  pfAttribs[] = {
-        WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
-        WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
-        WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
-        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
-        WGL_COLOR_BITS_ARB, 32,
-        WGL_DEPTH_BITS_ARB, 24,
-        WGL_ALPHA_BITS_ARB, 8,
-        WGL_SWAP_METHOD_ARB,WGL_SWAP_EXCHANGE_ARB,
-        WGL_ACCELERATION_ARB, WGL_FULL_ACCELERATION_ARB,
-        WGL_SAMPLE_BUFFERS_ARB, GL_TRUE,
-        WGL_SAMPLES_ARB, (INT)msaa,
-        0
-      };
-      if (wglChoosePixelFormatARB(hDC, pfAttribs, NULL, 1, &pfMSAA, &num_formats))
-      {
-        if (num_formats > 0)
-        {
-          break;
-        }
-      }
-      msaa--;
-    }
-
-    if (NULL != hRC) wglMakeCurrent(NULL, NULL);
-    if (NULL != hRC) wglDeleteContext(hRC);
-    if (NULL != hWnd && NULL != hDC) ReleaseDC(hWnd, hDC);
-    if (NULL != hWnd) DestroyWindow(hWnd);
-    UnregisterClass(_T("GLEW"), GetModuleHandle(NULL));
-    return pfMSAA;
-}
-
-EXTERN_C VOID CFORCEINLINE
-w32_wgl_attach_device(
-    w32_window* wnd)
-{
-    PIXELFORMATDESCRIPTOR pfd  = {0};
-    INT                   msaa = w32_wgl_get_pixel_format(16U);
-    pfd.nSize    = sizeof(PIXELFORMATDESCRIPTOR);
-    pfd.nVersion = 1;
-    pfd.dwFlags  = PFD_DRAW_TO_WINDOW |     // Format Must Support Window
-                   PFD_SUPPORT_OPENGL |     // Format Must Support OpenGL
-                   PFD_SUPPORT_COMPOSITION | // Format Must Support Composition
-                   PFD_GENERIC_ACCELERATED |
-                   PFD_SWAP_EXCHANGE      |
-                   PFD_DOUBLEBUFFER;
-    pfd.cAlphaBits = 8;
-    pfd.cDepthBits = 24;
-    pfd.cColorBits = 32;
-    pfd.iPixelType = PFD_TYPE_RGBA;
-    HDC hDC = GetDC(wnd->hWnd);
-    ASSERT_W32(SetPixelFormat(hDC, msaa, &pfd));
-    HGLRC hRC = wglCreateContextAttribsARB(hDC, NULL, NULL);
-    ASSERT_W32(hRC);
-    ASSERT_W32(wglMakeCurrent(hDC, hRC));
-    ASSERT_W32(wglSwapIntervalEXT(0));
 }
