@@ -87,23 +87,23 @@ SetAlphaComposition(
 
 #define MAX_ENUM_MONITORS                               (16U)
 
-typedef struct _w32_monitor_info {
+typedef struct _w32_display_info {
     CHAR          deviceName[CCHDEVICENAME + 1];
     BYTE          unused;
     WCHAR         deviceNameW[CCHDEVICENAME + 1];
     DEVMODE       deviceMode;
     MONITORINFOEX monitorInfoEx;
-} w32_monitor_info;
+} DISPLAYINFO, * PDISPLAYINFO;
 
-typedef struct _w32_display_info {
-    RECT             boundingRect;
-    UINT             numMonitors;
-    w32_monitor_info monitors[MAX_ENUM_MONITORS];
-} w32_display_info;
+typedef struct _w32_display_configuration {
+    RECT        rcBound;
+    UINT        nDisplays;
+    DISPLAYINFO lpDisplays[MAX_ENUM_MONITORS];
+} DISPLAYCONFIG, *PDISPLAYCONFIG;
 
 EXTERN_C BOOL FORCEINLINE
-GetDisplayInfo(
-    w32_display_info* displayInfo
+GetDisplayConfig(
+    PDISPLAYCONFIG lpDisplayConfig
     );
 
 EXTERN_C BOOL FORCEINLINE

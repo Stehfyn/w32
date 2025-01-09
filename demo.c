@@ -29,13 +29,13 @@ WinMain(
       w32_create_window_class(
         _T("w32_demo_class"),
         _T("res\\checkerboard.ico"),
-        CS_VREDRAW | CS_HREDRAW | CS_OWNDC
+        CS_VREDRAW | CS_HREDRAW | CS_OWNDC | CS_BYTEALIGNWINDOW | CS_BYTEALIGNCLIENT
       ),
       start.x,
       start.y,
       sz.cx,
       sz.cy,
-      WS_EX_APPWINDOW,
+      WS_EX_APPWINDOW,// | WS_EX_COMPOSITED, 
       WS_POPUP | WS_SYSMENU | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX,
       WndProc,
       NULL,
@@ -54,14 +54,13 @@ WinMain(
         HANDLE hTimer = CreateHighResolutionTimer(NULL, NULL, TIMER_ALL_ACCESS);
         if (hTimer)
           for (;;) {
-            (void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
+            //(void) SetWaitableTimerEx(hTimer, &dueTime, 0, 0, 0, NULL, 0);
             if (!PumpMessageQueue(NULL))
               break;
-            //Sleep(15);
-            (void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
+            //Sleep(1);
+            //(void) WaitForSingleObjectEx(hTimer, INFINITE, TRUE);
           }
       }
-      //#endif
     }
     return 0;
 }

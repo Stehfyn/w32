@@ -12,11 +12,13 @@
 #include "w32.h"
 #include <intrin.h>
 #include <windowsx.h>
-#pragma warning(disable : 4255 4820)
+#pragma warning(disable : 4255 4820 4431 4218 4820)
 #include <dwmapi.h>
 #include <shellscalingapi.h>
 #include <winternl.h>
-#pragma warning(default : 4255 4820)
+#define  NTSTATUS LONG
+#include <D3dkmthk.h>
+#pragma warning(default : 4255 4820 4431 4218 4820)
 
 /*=============================================================================
 ** 3. DECLARATIONS
@@ -26,6 +28,13 @@
 **===========================================================================*/
 #define STATUS_SUCCESS (0x00000000)
 #define ASSERT_W32(cond) do { if (!(cond)) __debugbreak(); } while (0)
+#define BGR(color) RGB(GetBValue(color), GetGValue(color), GetRValue(color))
+
+#define HANDLE_WM_ENTERSIZEMOVE(hWnd, wParam, lParam, fn) \
+        ((fn)((hWnd)), 0L)
+#define HANDLE_WM_EXITSIZEMOVE(hWnd, wParam, lParam, fn) \
+        ((fn)((hWnd)), 0L)
+
 /*=============================================================================
 ** 3.2 Types
 **===========================================================================*/
@@ -63,7 +72,7 @@ wndproc(
     );
 
 static BOOL
-monitorenumproc(
+MonitorEnumProc(
     HMONITOR hMonitor,
     HDC      hDC,
     LPRECT   lpRect,
@@ -71,12 +80,12 @@ monitorenumproc(
     );
 
 VOID CFORCEINLINE
-on_destroy(
+OnDestroy(
     HWND hWnd
     );
 
 VOID CFORCEINLINE
-on_size(
+OnSize(
     HWND hWnd,
     UINT state,
     INT  cx,
@@ -84,7 +93,7 @@ on_size(
     );
 
 VOID CFORCEINLINE
-on_keyup(
+OnKeyUp(
     HWND hWnd,
     UINT vk,
     BOOL fDown,
@@ -93,7 +102,7 @@ on_keyup(
     );
 
 VOID CFORCEINLINE
-on_activate(
+OnActivate(
     HWND hWnd,
     UINT state,
     HWND hwndActDeact,
@@ -101,27 +110,27 @@ on_activate(
     );
 
 UINT CFORCEINLINE
-on_nchittest(
+OnNcHittest(
     HWND hWnd,
     INT  x,
     INT  y
     );
 
 UINT CFORCEINLINE
-on_nccalcsize(
+OnNcCalcSize(
     HWND               hWnd,
     BOOL               fCalcValidRects,
     NCCALCSIZE_PARAMS* lpcsp
     );
 
 UINT CFORCEINLINE
-on_erasebkgnd(
+OnEraseBkgnd(
     HWND hWnd,
     HDC  hDC
     );
 
 VOID CFORCEINLINE
-on_paint(
+OnPaint(
     HWND hWnd
     );
 
@@ -163,7 +172,7 @@ wndproc(
       }
 
       switch (msg) {
-      HANDLE_MSG(hWnd, WM_DESTROY, on_destroy);
+      HANDLE_MSG(hWnd, WM_DESTROY, OnDestroy);
       default:
         break;
       }
@@ -173,7 +182,7 @@ wndproc(
 }
 
 static BOOL
-monitorenumproc(
+MonitorEnumProc(
     HMONITOR hMonitor,
     HDC      hDC,
     LPRECT   lpRect,
@@ -181,30 +190,30 @@ monitorenumproc(
 {
     UNREFERENCED_PARAMETER(hDC);
 
-    w32_display_info* display_info    = NULL;
-    w32_monitor_info* monitor_info    = NULL;
+    PDISPLAYCONFIG   lpDisplayConfig = NULL;
+    PDISPLAYINFO     lpDisplayInfo   = NULL;
     LPMONITORINFOEX   lpMonitorInfoEx = NULL;
     LPDEVMODE         lpDevMode       = NULL;
 
-    display_info            = (w32_display_info*) lParam;
-    monitor_info            = (w32_monitor_info*) &display_info->monitors[display_info->numMonitors];
-    lpMonitorInfoEx         = (LPMONITORINFOEX) &monitor_info->monitorInfoEx;
-    lpDevMode               = (LPDEVMODE) &monitor_info->deviceMode;
-    lpMonitorInfoEx->cbSize = (DWORD) sizeof(MONITORINFOEX);
-    lpDevMode->dmSize       = (WORD) sizeof(DEVMODE);
+    lpDisplayConfig         = (PDISPLAYCONFIG)lParam;
+    lpDisplayInfo           = (PDISPLAYINFO)&lpDisplayConfig->lpDisplays[lpDisplayConfig->nDisplays];
+    lpMonitorInfoEx         = (LPMONITORINFOEX)&lpDisplayInfo->monitorInfoEx;
+    lpDevMode               = (LPDEVMODE)&lpDisplayInfo->deviceMode;
+    lpMonitorInfoEx->cbSize = (DWORD)sizeof(MONITORINFOEX);
+    lpDevMode->dmSize       = (WORD)sizeof(DEVMODE);
 
     (VOID)GetMonitorInfo(
       hMonitor,
       (LPMONITORINFO)lpMonitorInfoEx
     );
     (VOID)UnionRect(
-      &display_info->boundingRect,
-      &display_info->boundingRect,
+      &lpDisplayConfig->rcBound,
+      &lpDisplayConfig->rcBound,
       lpRect
     );
 #ifdef UNICODE
     (VOID)wcsncpy_s(
-      monitor_info->deviceNameW,
+      lpDisplayInfo->deviceNameW,
       CCHDEVICENAME + 1,
       lpMonitorInfoEx->szDevice,
       CCHDEVICENAME
@@ -214,19 +223,19 @@ monitorenumproc(
       0,
       (LPCWCH)lpMonitorInfoEx->szDevice,
       CCHDEVICENAME,
-      (LPSTR)monitor_info->deviceName,
+      (LPSTR)lpDisplayInfo->deviceName,
       CCHDEVICENAME + 1,
       0,
       NULL
     );
     (VOID)EnumDisplaySettings(
-      monitor_info->deviceNameW,
+      lpDisplayInfo->deviceNameW,
       ENUM_CURRENT_SETTINGS,
-      &monitor_info->deviceMode
+      &lpDisplayInfo->deviceMode
     );
 #else
     (VOID)strncpy_s(
-      monitor_info->deviceName,
+      lpDisplayInfo->deviceName,
       CCHDEVICENAME + 1,
       lpMonitorInfoEx->szDevice,
       CCHDEVICENAME
@@ -236,20 +245,20 @@ monitorenumproc(
       0,
       (LPCCH)lpMonitorInfoEx->szDevice,
       CCHDEVICENAME,
-      (LPWSTR)monitor_info->deviceNameW,
+      (LPWSTR)lpDisplayInfo->deviceNameW,
       CCHDEVICENAME + 1
     );
     (VOID)EnumDisplaySettings(
-      monitor_info->deviceName,
+      lpDisplayInfo->deviceName,
       ENUM_CURRENT_SETTINGS,
-      &monitor_info->deviceMode
+      &lpDisplayInfo->deviceMode
     );
 #endif
-    return (display_info->numMonitors++ < MAX_ENUM_MONITORS);
+    return (lpDisplayConfig->nDisplays++ < MAX_ENUM_MONITORS);
 }
 
 VOID CFORCEINLINE
-on_destroy(
+OnDestroy(
     HWND hWnd)
 {
     UNREFERENCED_PARAMETER(hWnd);
@@ -258,7 +267,7 @@ on_destroy(
 }
 
 BOOL CFORCEINLINE
-on_ncactivate(
+OnNcActivate(
     HWND hWnd,
     BOOL fActive,
     HWND hwndActDeact,
@@ -272,7 +281,7 @@ on_ncactivate(
 }
 
 VOID CFORCEINLINE
-on_size(
+OnSize(
     HWND hWnd,
     UINT state,
     INT  cx,
@@ -288,7 +297,7 @@ on_size(
 }
 
 VOID CFORCEINLINE
-on_keyup(
+OnKeyUp(
     HWND hWnd,
     UINT vk,
     BOOL fDown,
@@ -316,7 +325,6 @@ on_keyup(
     case VK_ESCAPE:
     {
       if (hWnd == GetForegroundWindow())
-        //CloseWindow(hWnd);
         DestroyWindow(hWnd);
       break;
     }
@@ -325,7 +333,7 @@ on_keyup(
 }
 
 VOID CFORCEINLINE
-on_activate(
+OnActivate(
     HWND hWnd,
     UINT state,
     HWND hwndActDeact,
@@ -355,7 +363,7 @@ on_activate(
 }
 
 UINT CFORCEINLINE
-on_nchittest(
+OnNcHittest(
     HWND hWnd,
     INT  x,
     INT  y)
@@ -364,8 +372,8 @@ on_nchittest(
     const POINT cursor = {(LONG) x, (LONG) y};
     const SIZE  border =
     {
-      (LONG) (GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER)),
-      (LONG) (GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER))  // Padded border is symmetric for both x, y
+      (LONG)(GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER)),
+      (LONG)(GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER))  // Padded border is symmetric for both x, y
     };
     (VOID) GetWindowRect(hWnd, &r);
 
@@ -397,9 +405,9 @@ on_nchittest(
     default:             return FORWARD_WM_NCHITTEST(hWnd, x, y, DefWindowProc);
     }
 }
-
+//https://stackoverflow.com/a/53017156/22468901
 UINT CFORCEINLINE
-on_nccalcsize(
+OnNcCalcSize(
     HWND               hWnd,
     BOOL               fCalcValidRects,
     NCCALCSIZE_PARAMS* lpcsp)
@@ -418,14 +426,17 @@ on_nccalcsize(
           return 0;
         }
       }
+      //lpcsp->rgrc[2] = lpcsp->rgrc[1];
       lpcsp->rgrc[0].bottom += 1;
       return WVR_VALIDRECTS;
+      //return 0;
+//WVR_
     }
     return 0;
 }
 
 UINT CFORCEINLINE
-on_erasebkgnd(
+OnEraseBkgnd(
     HWND hWnd,
     HDC  hDC)
 {
@@ -436,14 +447,57 @@ on_erasebkgnd(
 }
 
 VOID CFORCEINLINE
-on_paint(
+OnPaint(
     HWND hWnd)
 {
+  static DWORD dwmColor = 0;
+  BOOL isOpaque = FALSE;
+  DwmGetColorizationColor(&dwmColor, &isOpaque);
+  D3DKMT_WAITFORVERTICALBLANKEVENT we;
+  D3DKMT_OPENADAPTERFROMHDC oa;
+  oa.hDc = GetDC(hWnd);
+  D3DKMTOpenAdapterFromHdc(&oa);
     PAINTSTRUCT ps;
-    (void) BeginPaint(hWnd, &ps);
-    (void) EndPaint(hWnd, &ps);
-    DwmFlush();
-    FORWARD_WM_PAINT(hWnd, DefWindowProc);
+    HDC hDC = BeginPaint(hWnd, &ps);
+    we.hDevice = 0;
+    we.hAdapter = oa.hAdapter;
+we.VidPnSourceId = oa.VidPnSourceId;
+  if(D3DKMTWaitForVerticalBlankEvent(&we))
+ExitProcess(0);
+    COLORREF color = BGR(dwmColor);
+    HBRUSH brush = CreateSolidBrush(color);
+    
+    FillRect(hDC, &ps.rcPaint, brush);
+    DeleteObject(brush);
+    EndPaint(hWnd, &ps);
+    //DwmFlush();
+
+}
+
+VOID CFORCEINLINE
+OnEnterSizeMove(
+    HWND hWnd)
+{
+    SetTimer(hWnd, (UINT_PTR)0, USER_TIMER_MINIMUM, 0);
+    RedrawWindow(hWnd, 0, 0, RDW_INVALIDATE | RDW_UPDATENOW);
+}
+
+VOID CFORCEINLINE
+OnTimer(
+    HWND hWnd,
+    UINT id)
+{
+    UNREFERENCED_PARAMETER(id);
+    //RedrawWindow(hWnd, 0, 0, RDW_INVALIDATE | RDW_UPDATENOW);
+    InvalidateRect(hWnd, 0, 0);
+    OnPaint(hWnd);
+}
+
+VOID CFORCEINLINE
+OnExitSizeMove(
+    HWND hWnd)
+{
+    KillTimer(hWnd, (UINT_PTR)0);
 }
 
 HICON FORCEINLINE
@@ -479,7 +533,8 @@ w32_create_window_class(
       wcex.cbSize        = sizeof(WNDCLASSEX);
       wcex.lpszClassName = lpszClassName;
       wcex.style         = style;
-      wcex.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
+      //wcex.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+      wcex.hbrBackground = NULL;
       wcex.hCursor       = LoadCursor(NULL, IDC_ARROW);
       wcex.lpfnWndProc   = (WNDPROC) wndproc;
       wcex.hIcon         = (HICON) LoadImage(
@@ -568,14 +623,14 @@ RunMessageQueue(
 }
 
 BOOL FORCEINLINE
-GetDisplayInfo(
-    w32_display_info* displayInfo)
+GetDisplayConfig(
+    PDISPLAYCONFIG lpDisplayConfig)
 {
     return EnumDisplayMonitors(
       NULL,
       NULL,
-      (MONITORENUMPROC)monitorenumproc,
-      (LPARAM)displayInfo
+      (MONITORENUMPROC)MonitorEnumProc,
+      (LPARAM)lpDisplayConfig
     );
 }
 
@@ -589,12 +644,12 @@ RequestSystemDpiAutonomy(
 BOOL FORCEINLINE
 SetAlphaComposition(
     w32_window* wnd,
-    BOOL        enabled)
+    BOOL        fEnabled)
 {
     ASSERT_W32(wnd);
-    DWM_BLURBEHIND bb = {0};
-
-    if (enabled)
+    DWM_BLURBEHIND bb;
+    RtlSecureZeroMemory(&bb, sizeof(DWM_BLURBEHIND));
+    if (fEnabled)
     {
       HRGN region = CreateRectRgn(0, 0, -1, -1);
       bb.dwFlags  = DWM_BB_ENABLE | DWM_BB_BLURREGION;
@@ -759,31 +814,18 @@ WndProc(
       }
     }
     switch (msg) {
-    HANDLE_MSG(hWnd, WM_SIZE,       on_size);
-    HANDLE_MSG(hWnd, WM_KEYUP,      on_keyup);
-    HANDLE_MSG(hWnd, WM_ACTIVATE,   on_activate);
-    HANDLE_MSG(hWnd, WM_NCHITTEST,  on_nchittest);
-    HANDLE_MSG(hWnd, WM_NCCALCSIZE, on_nccalcsize);
-    //HANDLE_MSG(hWnd, WM_PAINT,      on_paint);
-    HANDLE_MSG(hWnd, WM_ERASEBKGND, on_erasebkgnd);
-    HANDLE_MSG(hWnd, WM_DESTROY,    on_destroy);
-    case (WM_ENTERSIZEMOVE): {
-      (void) SetTimer(hWnd, (UINT_PTR)0, USER_TIMER_MINIMUM, NULL);
-      return 0;
-    }
-    case (WM_TIMER): {
-      static w32_window* wnd = NULL;
-      if(!wnd){
-
-        wnd = (w32_window*) GetWindowLongPtr(hWnd, GWLP_USERDATA);
-      }
-      //on_paint(hWnd);
-      return 0;
-    }
-    case (WM_EXITSIZEMOVE): {
-      (void) KillTimer(hWnd, (UINT_PTR)0);
-      return 0;
-    }
+    HANDLE_MSG(hWnd, WM_SIZE,          OnSize);
+    HANDLE_MSG(hWnd, WM_KEYUP,         OnKeyUp);
+    HANDLE_MSG(hWnd, WM_NCACTIVATE,    OnNcActivate);
+    HANDLE_MSG(hWnd, WM_ACTIVATE,      OnActivate);
+    HANDLE_MSG(hWnd, WM_NCHITTEST,     OnNcHittest);
+    HANDLE_MSG(hWnd, WM_NCCALCSIZE,    OnNcCalcSize);
+    HANDLE_MSG(hWnd, WM_PAINT,         OnPaint);
+    HANDLE_MSG(hWnd, WM_TIMER,         OnTimer);
+    HANDLE_MSG(hWnd, WM_ENTERSIZEMOVE, OnEnterSizeMove);
+    HANDLE_MSG(hWnd, WM_EXITSIZEMOVE,  OnExitSizeMove);
+    HANDLE_MSG(hWnd, WM_ERASEBKGND,    OnEraseBkgnd);
+    HANDLE_MSG(hWnd, WM_DESTROY,       OnDestroy);
     default: return DefWindowProc(hWnd, msg, wParam, lParam);
     }
 }
