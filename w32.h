@@ -178,4 +178,8 @@ HectonanoSleep(
     LONGLONG hns
     );
 
+EXTERN_C LPCTSTR FORCEINLINE
+DecipherMessage(
+    UINT uMsg);
+
 #endif
